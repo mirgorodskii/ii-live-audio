@@ -1,0 +1,16 @@
+{
+  "name": "ii-live-audio",
+  "version": "1.0.0",
+  "description": "Live audio relay for The Phone installation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.18.3",
+    "ws": "^8.16.0"
+  }
+}

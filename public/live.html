@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Phone Live Audio</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    main {
+      width: min(720px, 100%);
+      display: grid;
+      gap: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 650;
+    }
+    .panel {
+      border: 1px solid #333;
+      background: #1c1c1c;
+      border-radius: 8px;
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 12px 18px;
+      font-size: 15px;
+      font-weight: 650;
+      cursor: pointer;
+      background: #f0f0f0;
+      color: #111;
+    }
+    button:disabled {
+      opacity: .5;
+      cursor: default;
+    }
+    .status {
+      color: #bbb;
+      font-size: 14px;
+    }
+    .meters {
+      display: grid;
+      gap: 12px;
+    }
+    .meter {
+      display: grid;
+      gap: 6px;
+    }
+    .meter header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: #bbb;
+    }
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      background: #333;
+      overflow: hidden;
+    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      background: #d8d8d8;
+      transition: width 80ms linear;
+    }
+    .assistant .fill { background: #7dd3fc; }
+    .user .fill { background: #fbbf24; }
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: #bbb;
+    }
+    input[type="range"] {
+      width: 220px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>The Phone Live Audio</h1>
+
+    <section class="panel">
+      <div class="row">
+        <button id="startBtn">Start Listening</button>
+        <div class="status" id="status">Disconnected</div>
+      </div>
+
+      <div class="row">
+        <label>
+          Assistant volume
+          <input id="assistantVolume" type="range" min="0" max="150" value="100">
+        </label>
+        <label>
+          Human volume
+          <input id="userVolume" type="range" min="0" max="150" value="100">
+        </label>
+      </div>
+    </section>
+
+    <section class="panel meters">
+      <div class="meter assistant">
+        <header><span>Assistant</span><span id="assistantLevel">0.000</span></header>
+        <div class="bar"><div class="fill" id="assistantFill"></div></div>
+      </div>
+      <div class="meter user">
+        <header><span>Human</span><span id="userLevel">0.000</span></header>
+        <div class="bar"><div class="fill" id="userFill"></div></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const statusEl = document.getElementById('status');
+    const assistantVolume = document.getElementById('assistantVolume');
+    const userVolume = document.getElementById('userVolume');
+    const assistantLevel = document.getElementById('assistantLevel');
+    const userLevel = document.getElementById('userLevel');
+    const assistantFill = document.getElementById('assistantFill');
+    const userFill = document.getElementById('userFill');
+
+    let ws = null;
+    let audioContext = null;
+    const channels = {
+      assistant: { nextTime: 0, gain: null },
+      user: { nextTime: 0, gain: null }
+    };
+
+    function wsUrl() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${proto}//${location.host}/ws?role=listener`;
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function base64ToBytes(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    function rms(samples) {
+      let sum = 0;
+      for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+      return Math.sqrt(sum / Math.max(1, samples.length));
+    }
+
+    function updateMeter(channel, level) {
+      const label = channel === 'assistant' ? assistantLevel : userLevel;
+      const fill = channel === 'assistant' ? assistantFill : userFill;
+      label.textContent = level.toFixed(3);
+      fill.style.width = `${Math.min(100, level * 500)}%`;
+    }
+
+    function playPcm16(channelName, b64, sampleRate) {
+      const state = channels[channelName];
+      if (!state || !audioContext) return;
+
+      const bytes = base64ToBytes(b64);
+      const sampleCount = Math.floor(bytes.length / 2);
+      if (!sampleCount) return;
+
+      const buffer = audioContext.createBuffer(1, sampleCount, sampleRate || 24000);
+      const data = buffer.getChannelData(0);
+      const view = new DataView(bytes.buffer);
+      for (let i = 0; i < sampleCount; i++) {
+        data[i] = view.getInt16(i * 2, true) / 32768;
+      }
+
+      updateMeter(channelName, rms(data));
+
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(state.gain);
+
+      const startAt = Math.max(audioContext.currentTime + 0.08, state.nextTime || 0);
+      source.start(startAt);
+      state.nextTime = startAt + buffer.duration;
+    }
+
+    async function start() {
+      startBtn.disabled = true;
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+      channels.assistant.gain = audioContext.createGain();
+      channels.user.gain = audioContext.createGain();
+      channels.assistant.gain.connect(audioContext.destination);
+      channels.user.gain.connect(audioContext.destination);
+      channels.assistant.gain.gain.value = Number(assistantVolume.value) / 100;
+      channels.user.gain.gain.value = Number(userVolume.value) / 100;
+
+      assistantVolume.addEventListener('input', () => {
+        channels.assistant.gain.gain.value = Number(assistantVolume.value) / 100;
+      });
+      userVolume.addEventListener('input', () => {
+        channels.user.gain.gain.value = Number(userVolume.value) / 100;
+      });
+
+      ws = new WebSocket(wsUrl());
+      ws.onopen = () => setStatus('Connected. Waiting for phone audio...');
+      ws.onclose = () => {
+        setStatus('Disconnected');
+        startBtn.disabled = false;
+      };
+      ws.onerror = () => setStatus('Connection error');
+      ws.onmessage = (event) => {
+        let msg;
+        try {
+          msg = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (msg.type === 'ready') {
+          setStatus(msg.sourceConnected ? 'Live' : 'Connected. Phone not streaming.');
+          return;
+        }
+
+        if (msg.type === 'source_status') {
+          setStatus(msg.connected ? 'Live' : 'Phone disconnected');
+          return;
+        }
+
+        if (msg.type === 'audio') {
+          playPcm16(msg.channel, msg.audio, msg.sampleRate);
+        }
+      };
+    }
+
+    startBtn.addEventListener('click', start);
+  </script>
+</body>
+</html>
