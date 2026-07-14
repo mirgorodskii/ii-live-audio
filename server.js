@@ -19,6 +19,7 @@ let stats = {
   lastAudioAt: null,
   lastWarningAt: null
 };
+let currentHealthState = null;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -80,22 +81,24 @@ wss.on('connection', (ws, req) => {
 
       if (msg.type === 'warning') {
         stats.lastWarningAt = new Date().toISOString();
-        broadcast({
+        currentHealthState = {
           type: 'warning',
           level: msg.level || 'warning',
           message: msg.message || 'Phone health warning',
           at: msg.at || stats.lastWarningAt
-        });
+        };
+        broadcast(currentHealthState);
         return;
       }
 
       if (msg.type === 'health') {
-        broadcast({
+        currentHealthState = {
           type: 'health',
           ok: !!msg.ok,
           message: msg.message || '',
           at: msg.at || new Date().toISOString()
-        });
+        };
+        broadcast(currentHealthState);
         return;
       }
 
@@ -130,6 +133,9 @@ wss.on('connection', (ws, req) => {
     sourceConnected: !!source,
     listeners: listeners.size
   });
+  if (currentHealthState) {
+    sendJson(ws, currentHealthState);
+  }
 
   broadcast({ type: 'listener_count', listeners: listeners.size });
 
