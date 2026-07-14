@@ -191,8 +191,12 @@
       statusEl.textContent = text;
     }
 
+    function formatDateTime(at) {
+      return (at ? new Date(at) : new Date()).toLocaleString();
+    }
+
     function showWarning(message, at) {
-      const time = at ? new Date(at).toLocaleTimeString() : new Date().toLocaleTimeString();
+      const time = formatDateTime(at);
       warningText.textContent = `${time}: ${message}`;
       warningBox.style.display = 'block';
       healthStatus.textContent = `Health: warning at ${time} - ${message}`;
@@ -202,7 +206,7 @@
     function clearWarning(message, at) {
       warningBox.style.display = 'none';
       if (message) {
-        const time = at ? new Date(at).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const time = formatDateTime(at);
         setStatus(message);
         healthStatus.textContent = `Health: ok at ${time} - ${message}`;
         healthStatus.className = 'health ok';
