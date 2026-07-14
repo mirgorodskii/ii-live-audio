@@ -75,6 +75,13 @@
       color: #fbbf24;
       margin-bottom: 4px;
     }
+    .health {
+      color: #bbb;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .health.ok { color: #86efac; }
+    .health.warning { color: #fde68a; }
     .meters {
       display: grid;
       gap: 12px;
@@ -129,6 +136,8 @@
         <span id="warningText">Something is wrong.</span>
       </div>
 
+      <div class="health" id="healthStatus">Health: no check yet</div>
+
       <div class="row">
         <label>
           Assistant volume
@@ -164,6 +173,7 @@
     const userFill = document.getElementById('userFill');
     const warningBox = document.getElementById('warningBox');
     const warningText = document.getElementById('warningText');
+    const healthStatus = document.getElementById('healthStatus');
 
     let ws = null;
     let audioContext = null;
@@ -185,11 +195,18 @@
       const time = at ? new Date(at).toLocaleTimeString() : new Date().toLocaleTimeString();
       warningText.textContent = `${time}: ${message}`;
       warningBox.style.display = 'block';
+      healthStatus.textContent = `Health: warning at ${time} - ${message}`;
+      healthStatus.className = 'health warning';
     }
 
     function clearWarning(message) {
       warningBox.style.display = 'none';
-      if (message) setStatus(message);
+      if (message) {
+        const time = new Date().toLocaleTimeString();
+        setStatus(message);
+        healthStatus.textContent = `Health: ok at ${time} - ${message}`;
+        healthStatus.className = 'health ok';
+      }
     }
 
     function base64ToBytes(b64) {

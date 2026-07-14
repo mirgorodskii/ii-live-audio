@@ -28,6 +28,7 @@ app.get('/health', (req, res) => {
     ok: true,
     sourceConnected: !!source,
     listeners: listeners.size,
+    currentHealthState,
     stats
   });
 });
