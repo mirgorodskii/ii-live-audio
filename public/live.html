@@ -199,10 +199,10 @@
       healthStatus.className = 'health warning';
     }
 
-    function clearWarning(message) {
+    function clearWarning(message, at) {
       warningBox.style.display = 'none';
       if (message) {
-        const time = new Date().toLocaleTimeString();
+        const time = at ? new Date(at).toLocaleTimeString() : new Date().toLocaleTimeString();
         setStatus(message);
         healthStatus.textContent = `Health: ok at ${time} - ${message}`;
         healthStatus.className = 'health ok';
@@ -304,7 +304,7 @@
         }
 
         if (msg.type === 'health') {
-          if (msg.ok) clearWarning(msg.message || 'Health check ok');
+          if (msg.ok) clearWarning(msg.message || 'Health check ok', msg.at);
           else showWarning(msg.message || 'Health check failed', msg.at);
           return;
         }
