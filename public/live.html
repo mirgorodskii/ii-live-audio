@@ -60,6 +60,21 @@
       color: #bbb;
       font-size: 14px;
     }
+    .warning {
+      display: none;
+      border: 1px solid #f59e0b;
+      background: #2a1d05;
+      color: #fde68a;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .warning strong {
+      display: block;
+      color: #fbbf24;
+      margin-bottom: 4px;
+    }
     .meters {
       display: grid;
       gap: 12px;
@@ -109,6 +124,11 @@
         <div class="status" id="status">Disconnected</div>
       </div>
 
+      <div class="warning" id="warningBox">
+        <strong>Warning</strong>
+        <span id="warningText">Something is wrong.</span>
+      </div>
+
       <div class="row">
         <label>
           Assistant volume
@@ -142,6 +162,8 @@
     const userLevel = document.getElementById('userLevel');
     const assistantFill = document.getElementById('assistantFill');
     const userFill = document.getElementById('userFill');
+    const warningBox = document.getElementById('warningBox');
+    const warningText = document.getElementById('warningText');
 
     let ws = null;
     let audioContext = null;
@@ -157,6 +179,17 @@
 
     function setStatus(text) {
       statusEl.textContent = text;
+    }
+
+    function showWarning(message, at) {
+      const time = at ? new Date(at).toLocaleTimeString() : new Date().toLocaleTimeString();
+      warningText.textContent = `${time}: ${message}`;
+      warningBox.style.display = 'block';
+    }
+
+    function clearWarning(message) {
+      warningBox.style.display = 'none';
+      if (message) setStatus(message);
     }
 
     function base64ToBytes(b64) {
@@ -245,6 +278,17 @@
 
         if (msg.type === 'source_status') {
           setStatus(msg.connected ? 'Live' : 'Phone disconnected');
+          return;
+        }
+
+        if (msg.type === 'warning') {
+          showWarning(msg.message || 'Something is wrong with the phone AI response.', msg.at);
+          return;
+        }
+
+        if (msg.type === 'health') {
+          if (msg.ok) clearWarning(msg.message || 'Health check ok');
+          else showWarning(msg.message || 'Health check failed', msg.at);
           return;
         }
 

@@ -16,7 +16,8 @@ let stats = {
   assistantChunks: 0,
   userChunks: 0,
   connectedAt: null,
-  lastAudioAt: null
+  lastAudioAt: null,
+  lastWarningAt: null
 };
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -74,6 +75,27 @@ wss.on('connection', (ws, req) => {
       try {
         msg = JSON.parse(raw.toString());
       } catch {
+        return;
+      }
+
+      if (msg.type === 'warning') {
+        stats.lastWarningAt = new Date().toISOString();
+        broadcast({
+          type: 'warning',
+          level: msg.level || 'warning',
+          message: msg.message || 'Phone health warning',
+          at: msg.at || stats.lastWarningAt
+        });
+        return;
+      }
+
+      if (msg.type === 'health') {
+        broadcast({
+          type: 'health',
+          ok: !!msg.ok,
+          message: msg.message || '',
+          at: msg.at || new Date().toISOString()
+        });
         return;
       }
 
