@@ -128,6 +128,7 @@
     <section class="panel">
       <div class="row">
         <button id="startBtn">Start Listening</button>
+        <button id="healthOnlyBtn">Check Health Only</button>
         <div class="status" id="status">Disconnected</div>
       </div>
 
@@ -164,6 +165,7 @@
 
   <script>
     const startBtn = document.getElementById('startBtn');
+    const healthOnlyBtn = document.getElementById('healthOnlyBtn');
     const statusEl = document.getElementById('status');
     const assistantVolume = document.getElementById('assistantVolume');
     const userVolume = document.getElementById('userVolume');
@@ -177,6 +179,8 @@
 
     let ws = null;
     let audioContext = null;
+    let audioEnabled = false;
+    let volumeHandlersAttached = false;
     const channels = {
       assistant: { nextTime: 0, gain: null },
       user: { nextTime: 0, gain: null }
@@ -234,6 +238,7 @@
     }
 
     function playPcm16(channelName, b64, sampleRate) {
+      if (!audioEnabled) return;
       const state = channels[channelName];
       if (!state || !audioContext) return;
 
@@ -259,8 +264,85 @@
       state.nextTime = startAt + buffer.duration;
     }
 
-    async function start() {
+    function handleMessage(event) {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (msg.type === 'ready') {
+        setStatus(msg.sourceConnected ? 'Live' : 'Connected. Phone not streaming.');
+        return;
+      }
+
+      if (msg.type === 'source_status') {
+        setStatus(msg.connected ? 'Live' : 'Phone disconnected');
+        return;
+      }
+
+      if (msg.type === 'warning') {
+        showWarning(msg.message || 'Something is wrong with the phone AI response.', msg.at);
+        return;
+      }
+
+      if (msg.type === 'health') {
+        if (msg.ok) clearWarning(msg.message || 'Health check ok', msg.at);
+        else showWarning(msg.message || 'Health check failed', msg.at);
+        return;
+      }
+
+      if (msg.type === 'audio') {
+        playPcm16(msg.channel, msg.audio, msg.sampleRate);
+      }
+    }
+
+    function connectListener({ enableAudio }) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        audioEnabled = enableAudio;
+        startBtn.disabled = false;
+        healthOnlyBtn.disabled = false;
+        setStatus(enableAudio ? 'Live' : 'Health only');
+        return;
+      }
+
       startBtn.disabled = true;
+      healthOnlyBtn.disabled = true;
+      audioEnabled = enableAudio;
+
+      ws = new WebSocket(wsUrl());
+      ws.onopen = () => {
+        startBtn.disabled = false;
+        healthOnlyBtn.disabled = false;
+        setStatus(enableAudio ? 'Connected. Waiting for phone audio...' : 'Connected. Health only.');
+      };
+      ws.onclose = () => {
+        setStatus('Disconnected');
+        startBtn.disabled = false;
+        healthOnlyBtn.disabled = false;
+        audioEnabled = false;
+      };
+      ws.onerror = () => setStatus('Connection error');
+      ws.onmessage = handleMessage;
+    }
+
+    function stopAudioPlayback() {
+      audioEnabled = false;
+      if (audioContext) {
+        audioContext.close().catch(() => {});
+        audioContext = null;
+      }
+      channels.assistant.nextTime = 0;
+      channels.assistant.gain = null;
+      channels.user.nextTime = 0;
+      channels.user.gain = null;
+      updateMeter('assistant', 0);
+      updateMeter('user', 0);
+    }
+
+    async function start() {
+      if (audioEnabled) return;
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
       channels.assistant.gain = audioContext.createGain();
@@ -270,56 +352,26 @@
       channels.assistant.gain.gain.value = Number(assistantVolume.value) / 100;
       channels.user.gain.gain.value = Number(userVolume.value) / 100;
 
-      assistantVolume.addEventListener('input', () => {
-        channels.assistant.gain.gain.value = Number(assistantVolume.value) / 100;
-      });
-      userVolume.addEventListener('input', () => {
-        channels.user.gain.gain.value = Number(userVolume.value) / 100;
-      });
+      if (!volumeHandlersAttached) {
+        assistantVolume.addEventListener('input', () => {
+          if (channels.assistant.gain) channels.assistant.gain.gain.value = Number(assistantVolume.value) / 100;
+        });
+        userVolume.addEventListener('input', () => {
+          if (channels.user.gain) channels.user.gain.gain.value = Number(userVolume.value) / 100;
+        });
+        volumeHandlersAttached = true;
+      }
 
-      ws = new WebSocket(wsUrl());
-      ws.onopen = () => setStatus('Connected. Waiting for phone audio...');
-      ws.onclose = () => {
-        setStatus('Disconnected');
-        startBtn.disabled = false;
-      };
-      ws.onerror = () => setStatus('Connection error');
-      ws.onmessage = (event) => {
-        let msg;
-        try {
-          msg = JSON.parse(event.data);
-        } catch {
-          return;
-        }
+      connectListener({ enableAudio: true });
+    }
 
-        if (msg.type === 'ready') {
-          setStatus(msg.sourceConnected ? 'Live' : 'Connected. Phone not streaming.');
-          return;
-        }
-
-        if (msg.type === 'source_status') {
-          setStatus(msg.connected ? 'Live' : 'Phone disconnected');
-          return;
-        }
-
-        if (msg.type === 'warning') {
-          showWarning(msg.message || 'Something is wrong with the phone AI response.', msg.at);
-          return;
-        }
-
-        if (msg.type === 'health') {
-          if (msg.ok) clearWarning(msg.message || 'Health check ok', msg.at);
-          else showWarning(msg.message || 'Health check failed', msg.at);
-          return;
-        }
-
-        if (msg.type === 'audio') {
-          playPcm16(msg.channel, msg.audio, msg.sampleRate);
-        }
-      };
+    function checkHealthOnly() {
+      stopAudioPlayback();
+      connectListener({ enableAudio: false });
     }
 
     startBtn.addEventListener('click', start);
+    healthOnlyBtn.addEventListener('click', checkHealthOnly);
   </script>
 </body>
 </html>
