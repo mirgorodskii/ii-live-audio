@@ -69,7 +69,14 @@ wss.on('connection', (ws, req) => {
 
     source = ws;
     stats.connectedAt = new Date().toISOString();
+    currentHealthState = {
+      type: 'health',
+      ok: true,
+      message: 'Phone source connected',
+      at: stats.connectedAt
+    };
     broadcast({ type: 'source_status', connected: true });
+    broadcast(currentHealthState);
     sendJson(ws, { type: 'ready', role: 'source', listeners: listeners.size });
 
     ws.on('message', (raw) => {
