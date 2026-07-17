@@ -139,10 +139,16 @@ wss.on('connection', (ws, req) => {
   }
 
   broadcast({ type: 'listener_count', listeners: listeners.size });
+  if (source) {
+    sendJson(source, { type: 'listener_count', listeners: listeners.size });
+  }
 
   ws.on('close', () => {
     listeners.delete(ws);
     broadcast({ type: 'listener_count', listeners: listeners.size });
+    if (source) {
+      sendJson(source, { type: 'listener_count', listeners: listeners.size });
+    }
   });
 });
 
