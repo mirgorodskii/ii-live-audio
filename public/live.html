@@ -181,6 +181,9 @@
     let audioContext = null;
     let audioEnabled = false;
     let volumeHandlersAttached = false;
+    let lastHealth = null;
+    let sourceConnected = false;
+    const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const channels = {
       assistant: { nextTime: 0, gain: null },
       user: { nextTime: 0, gain: null }
@@ -197,6 +200,36 @@
 
     function formatDateTime(at) {
       return (at ? new Date(at) : new Date()).toLocaleString();
+    }
+
+    function formatAge(at) {
+      const elapsed = Math.max(0, Date.now() - new Date(at).getTime());
+      const minutes = Math.floor(elapsed / 60000);
+      if (minutes < 1) return 'just now';
+      if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+      const hours = Math.floor(minutes / 60);
+      return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    }
+
+    function renderHealth() {
+      if (!lastHealth) return;
+      const age = formatAge(lastHealth.at);
+      const stale = !sourceConnected || Date.now() - new Date(lastHealth.at).getTime() > HEALTH_STALE_AFTER_MS;
+      const ok = lastHealth.type === 'health' && lastHealth.ok && !stale;
+      const message = stale
+        ? `Last result is stale (${age}) - ${lastHealth.message}`
+        : `${lastHealth.message} (${age})`;
+
+      if (ok) {
+        warningBox.style.display = 'none';
+        healthStatus.textContent = `Health: ok - ${message}`;
+        healthStatus.className = 'health ok';
+      } else {
+        warningText.textContent = message;
+        warningBox.style.display = 'block';
+        healthStatus.textContent = `Health: warning - ${message}`;
+        healthStatus.className = 'health warning';
+      }
     }
 
     function showWarning(message, at) {
@@ -273,23 +306,28 @@
       }
 
       if (msg.type === 'ready') {
+        sourceConnected = !!msg.sourceConnected;
         setStatus(msg.sourceConnected ? 'Live' : 'Connected. Phone not streaming.');
+        renderHealth();
         return;
       }
 
       if (msg.type === 'source_status') {
+        sourceConnected = !!msg.connected;
         setStatus(msg.connected ? 'Live' : 'Phone disconnected');
+        renderHealth();
         return;
       }
 
       if (msg.type === 'warning') {
-        showWarning(msg.message || 'Something is wrong with the phone AI response.', msg.at);
+        lastHealth = msg;
+        renderHealth();
         return;
       }
 
       if (msg.type === 'health') {
-        if (msg.ok) clearWarning(msg.message || 'Health check ok', msg.at);
-        else showWarning(msg.message || 'Health check failed', msg.at);
+        lastHealth = msg;
+        renderHealth();
         return;
       }
 
@@ -372,6 +410,7 @@
 
     startBtn.addEventListener('click', start);
     healthOnlyBtn.addEventListener('click', checkHealthOnly);
+    setInterval(renderHealth, 30000);
   </script>
 </body>
 </html>
