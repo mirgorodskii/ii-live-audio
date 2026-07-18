@@ -184,9 +184,10 @@
     let lastHealth = null;
     let sourceConnected = false;
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
+    const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
     const channels = {
-      assistant: { nextTime: 0, gain: null },
-      user: { nextTime: 0, gain: null }
+      assistant: { nextTime: 0, gain: null, sources: new Set() },
+      user: { nextTime: 0, gain: null, sources: new Set() }
     };
 
     function wsUrl() {
@@ -298,9 +299,23 @@
       source.buffer = buffer;
       source.connect(state.gain);
 
+      const backlog = Math.max(0, (state.nextTime || 0) - audioContext.currentTime);
+      if (backlog > MAX_PLAYBACK_BACKLOG_SECONDS) {
+        for (const queuedSource of state.sources) {
+          try { queuedSource.stop(); } catch {}
+        }
+        state.sources.clear();
+        state.nextTime = audioContext.currentTime + 0.04;
+        setStatus('Live (dropped delayed audio)');
+      } else if (backlog > 0.5) {
+        source.playbackRate.value = 1.08;
+      }
+
       const startAt = Math.max(audioContext.currentTime + 0.08, state.nextTime || 0);
       source.start(startAt);
-      state.nextTime = startAt + buffer.duration;
+      state.nextTime = startAt + (buffer.duration / source.playbackRate.value);
+      state.sources.add(source);
+      source.onended = () => state.sources.delete(source);
     }
 
     function handleMessage(event) {
@@ -379,8 +394,10 @@
       }
       channels.assistant.nextTime = 0;
       channels.assistant.gain = null;
+      channels.assistant.sources.clear();
       channels.user.nextTime = 0;
       channels.user.gain = null;
+      channels.user.sources.clear();
       updateMeter('assistant', 0);
       updateMeter('user', 0);
     }
