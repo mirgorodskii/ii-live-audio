@@ -128,7 +128,7 @@
     <section class="panel">
       <div class="row">
         <button id="startBtn">Start Listening</button>
-        <button id="healthOnlyBtn">Check Health Only</button>
+        <button id="healthOnlyBtn">View Health Status Only</button>
         <div class="status" id="status">Disconnected</div>
       </div>
 
@@ -341,14 +341,22 @@
       }
 
       if (msg.type === 'warning') {
-        lastHealth = msg;
-        renderHealth();
+        if (msg.kind === 'test') {
+          lastHealth = msg;
+          renderHealth();
+        } else {
+          showWarning(msg.message || 'Phone status warning', msg.at);
+        }
         return;
       }
 
       if (msg.type === 'health') {
-        lastHealth = msg;
-        renderHealth();
+        if (msg.kind === 'test') {
+          lastHealth = msg;
+          renderHealth();
+        } else {
+          setStatus(msg.message || 'Phone status ok');
+        }
         return;
       }
 

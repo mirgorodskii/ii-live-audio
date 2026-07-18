@@ -69,14 +69,7 @@ wss.on('connection', (ws, req) => {
 
     source = ws;
     stats.connectedAt = new Date().toISOString();
-    currentHealthState = {
-      type: 'health',
-      ok: true,
-      message: 'Phone source connected',
-      at: stats.connectedAt
-    };
     broadcast({ type: 'source_status', connected: true });
-    broadcast(currentHealthState);
     sendJson(ws, { type: 'ready', role: 'source', listeners: listeners.size });
 
     ws.on('message', (raw) => {
@@ -89,24 +82,28 @@ wss.on('connection', (ws, req) => {
 
       if (msg.type === 'warning') {
         stats.lastWarningAt = new Date().toISOString();
-        currentHealthState = {
+        const event = {
           type: 'warning',
+          kind: msg.kind || 'status',
           level: msg.level || 'warning',
           message: msg.message || 'Phone health warning',
           at: msg.at || stats.lastWarningAt
         };
-        broadcast(currentHealthState);
+        if (event.kind === 'test') currentHealthState = event;
+        broadcast(event);
         return;
       }
 
       if (msg.type === 'health') {
-        currentHealthState = {
+        const event = {
           type: 'health',
+          kind: msg.kind || 'status',
           ok: !!msg.ok,
           message: msg.message || '',
           at: msg.at || new Date().toISOString()
         };
-        broadcast(currentHealthState);
+        if (event.kind === 'test') currentHealthState = event;
+        broadcast(event);
         return;
       }
 
