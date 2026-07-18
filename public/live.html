@@ -199,11 +199,15 @@
     }
 
     function formatDateTime(at) {
-      return (at ? new Date(at) : new Date()).toLocaleString();
+      if (!at) return 'unknown time';
+      const date = new Date(at);
+      return Number.isNaN(date.getTime()) ? 'unknown time' : date.toLocaleString();
     }
 
     function formatAge(at) {
-      const elapsed = Math.max(0, Date.now() - new Date(at).getTime());
+      const timestamp = new Date(at).getTime();
+      if (!at || Number.isNaN(timestamp)) return 'unknown age';
+      const elapsed = Math.max(0, Date.now() - timestamp);
       const minutes = Math.floor(elapsed / 60000);
       if (minutes < 1) return 'just now';
       if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
@@ -213,12 +217,14 @@
 
     function renderHealth() {
       if (!lastHealth) return;
+      const time = formatDateTime(lastHealth.at);
       const age = formatAge(lastHealth.at);
-      const stale = !sourceConnected || Date.now() - new Date(lastHealth.at).getTime() > HEALTH_STALE_AFTER_MS;
+      const healthTimestamp = new Date(lastHealth.at).getTime();
+      const stale = !sourceConnected || Number.isNaN(healthTimestamp) || Date.now() - healthTimestamp > HEALTH_STALE_AFTER_MS;
       const ok = lastHealth.type === 'health' && lastHealth.ok && !stale;
       const message = stale
-        ? `Last result is stale (${age}) - ${lastHealth.message}`
-        : `${lastHealth.message} (${age})`;
+        ? `Last result from ${time} is stale (${age}) - ${lastHealth.message}`
+        : `Tested at ${time} (${age}) - ${lastHealth.message}`;
 
       if (ok) {
         warningBox.style.display = 'none';
