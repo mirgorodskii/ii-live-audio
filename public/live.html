@@ -81,10 +81,6 @@
     }
     .health.ok { color: #86efac; }
     .health.warning { color: #fde68a; }
-    .meters {
-      display: grid;
-      gap: 12px;
-    }
     .meter {
       display: grid;
       gap: 6px;
@@ -187,30 +183,20 @@
         <label>Volume: <span id="assistantVolumeValue">100%</span>
           <input id="assistantVolume" type="range" min="0" max="150" value="100">
         </label>
-        <label>Bass: <span id="assistantBassValue">0 dB</span>
-          <input id="assistantBass" class="eq-control" data-channel="assistant" data-band="bass" type="range" min="-12" max="12" value="0">
-        </label>
-        <label>Mid: <span id="assistantMidValue">0 dB</span>
-          <input id="assistantMid" class="eq-control" data-channel="assistant" data-band="mid" type="range" min="-12" max="12" value="0">
-        </label>
-        <label>Treble: <span id="assistantTrebleValue">0 dB</span>
-          <input id="assistantTreble" class="eq-control" data-channel="assistant" data-band="treble" type="range" min="-12" max="12" value="0">
-        </label>
+        <div class="meter assistant">
+          <header><span>Loudness</span><span id="assistantLevel">0.000</span></header>
+          <div class="bar"><div class="fill" id="assistantFill"></div></div>
+        </div>
       </section>
       <section class="audio-channel user">
         <h3>Human</h3>
         <label>Volume: <span id="userVolumeValue">100%</span>
           <input id="userVolume" type="range" min="0" max="150" value="100">
         </label>
-        <label>Bass: <span id="userBassValue">0 dB</span>
-          <input id="userBass" class="eq-control" data-channel="user" data-band="bass" type="range" min="-12" max="12" value="0">
-        </label>
-        <label>Mid: <span id="userMidValue">0 dB</span>
-          <input id="userMid" class="eq-control" data-channel="user" data-band="mid" type="range" min="-12" max="12" value="0">
-        </label>
-        <label>Treble: <span id="userTrebleValue">0 dB</span>
-          <input id="userTreble" class="eq-control" data-channel="user" data-band="treble" type="range" min="-12" max="12" value="0">
-        </label>
+        <div class="meter user">
+          <header><span>Loudness</span><span id="userLevel">0.000</span></header>
+          <div class="bar"><div class="fill" id="userFill"></div></div>
+        </div>
       </section>
     </div>
   </aside>
@@ -239,16 +225,6 @@
       </div>
     </section>
 
-    <section class="panel meters">
-      <div class="meter assistant">
-        <header><span>Assistant</span><span id="assistantLevel">0.000</span></header>
-        <div class="bar"><div class="fill" id="assistantFill"></div></div>
-      </div>
-      <div class="meter user">
-        <header><span>Human</span><span id="userLevel">0.000</span></header>
-        <div class="bar"><div class="fill" id="userFill"></div></div>
-      </div>
-    </section>
   </main>
 
   <script>
@@ -265,7 +241,6 @@
     const userVolume = document.getElementById('userVolume');
     const assistantVolumeValue = document.getElementById('assistantVolumeValue');
     const userVolumeValue = document.getElementById('userVolumeValue');
-    const eqControls = [...document.querySelectorAll('.eq-control')];
     const assistantLevel = document.getElementById('assistantLevel');
     const userLevel = document.getElementById('userLevel');
     const assistantFill = document.getElementById('assistantFill');
@@ -283,8 +258,8 @@
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
     const channels = {
-      assistant: { nextTime: 0, gain: null, eq: null, sources: new Set() },
-      user: { nextTime: 0, gain: null, eq: null, sources: new Set() }
+      assistant: { nextTime: 0, gain: null, sources: new Set() },
+      user: { nextTime: 0, gain: null, sources: new Set() }
     };
 
     function setSecretPanel(open) {
@@ -320,51 +295,20 @@
       if (channels[channelName].gain) channels[channelName].gain.gain.value = level / 100;
     }
 
-    function updateEqControl(input) {
-      const channelName = input.dataset.channel;
-      const band = input.dataset.band;
-      const gain = Number(input.value);
-      document.getElementById(`${channelName}${band[0].toUpperCase()}${band.slice(1)}Value`).textContent = `${gain} dB`;
-      saveAudioSetting(settingKey(channelName, band), gain);
-      if (channels[channelName].eq?.[band]) channels[channelName].eq[band].gain.value = gain;
-    }
-
     function loadAudioSettings() {
       assistantVolume.value = String(readSavedNumber(settingKey('assistant', 'volume'), 100, 0, 150));
       userVolume.value = String(readSavedNumber(settingKey('user', 'volume'), 100, 0, 150));
       assistantVolumeValue.textContent = `${assistantVolume.value}%`;
       userVolumeValue.textContent = `${userVolume.value}%`;
-      for (const input of eqControls) {
-        input.value = String(readSavedNumber(settingKey(input.dataset.channel, input.dataset.band), 0, -12, 12));
-        updateEqControl(input);
-      }
     }
 
     function createChannelAudioGraph(channelName) {
       const state = channels[channelName];
       state.gain = audioContext.createGain();
-      const bass = audioContext.createBiquadFilter();
-      bass.type = 'lowshelf';
-      bass.frequency.value = 200;
-      const mid = audioContext.createBiquadFilter();
-      mid.type = 'peaking';
-      mid.frequency.value = 1000;
-      mid.Q.value = 1;
-      const treble = audioContext.createBiquadFilter();
-      treble.type = 'highshelf';
-      treble.frequency.value = 4000;
-
-      state.eq = { bass, mid, treble };
-      state.gain.connect(bass);
-      bass.connect(mid);
-      mid.connect(treble);
-      treble.connect(audioContext.destination);
+      state.gain.connect(audioContext.destination);
 
       const volume = channelName === 'assistant' ? assistantVolume : userVolume;
       state.gain.gain.value = Number(volume.value) / 100;
-      for (const input of eqControls.filter(control => control.dataset.channel === channelName)) {
-        state.eq[input.dataset.band].gain.value = Number(input.value);
-      }
     }
 
     function wsUrl() {
@@ -620,11 +564,9 @@
       }
       channels.assistant.nextTime = 0;
       channels.assistant.gain = null;
-      channels.assistant.eq = null;
       channels.assistant.sources.clear();
       channels.user.nextTime = 0;
       channels.user.gain = null;
-      channels.user.eq = null;
       channels.user.sources.clear();
       updateMeter('assistant', 0);
       updateMeter('user', 0);
@@ -658,7 +600,6 @@
     });
     assistantVolume.addEventListener('input', () => updateVolume('assistant'));
     userVolume.addEventListener('input', () => updateVolume('user'));
-    eqControls.forEach(input => input.addEventListener('input', () => updateEqControl(input)));
     loadAudioSettings();
     try {
       const savedRingVolume = localStorage.getItem('phoneRingVolume');
