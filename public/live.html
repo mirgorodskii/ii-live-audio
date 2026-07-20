@@ -60,10 +60,6 @@
       background: #22c55e;
       color: #071b0d;
     }
-    #ringBtn.ringing {
-      background: #fbbf24;
-      color: #211500;
-    }
     .status {
       color: #bbb;
       font-size: 14px;
@@ -137,7 +133,7 @@
       <div class="row">
         <button id="startBtn">Start Listening</button>
         <button id="healthOnlyBtn">View Health Status Only</button>
-        <button id="ringBtn">Ring USB Speaker</button>
+        <button id="ringBtn">Ring Phone Speaker</button>
         <div class="status" id="status">Disconnected</div>
       </div>
 
@@ -193,8 +189,6 @@
     let volumeHandlersAttached = false;
     let lastHealth = null;
     let sourceConnected = false;
-    let ringTimer = null;
-    let ringSources = [];
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
     const channels = {
@@ -330,62 +324,21 @@
       source.onended = () => state.sources.delete(source);
     }
 
-    function stopRing() {
-      if (ringTimer) {
-        clearTimeout(ringTimer);
-        ringTimer = null;
-      }
-      for (const source of ringSources) {
-        try { source.stop(); } catch {}
-      }
-      ringSources = [];
-      ringBtn.disabled = false;
-      ringBtn.classList.remove('ringing');
-      ringBtn.textContent = 'Ring USB Speaker';
-    }
-
     async function ringUsbSpeaker() {
-      if (ringTimer) {
-        stopRing();
-        setStatus('Ring stopped');
-        return;
+      ringBtn.disabled = true;
+      ringBtn.textContent = 'Ringing...';
+      setStatus('Sending ring command to Raspberry Pi...');
+      try {
+        const response = await fetch('/ring', { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setStatus(result.message || 'Phone speaker rang');
+      } catch (error) {
+        setStatus(`Ring failed: ${error.message}`);
+      } finally {
+        ringBtn.disabled = false;
+        ringBtn.textContent = 'Ring Phone Speaker';
       }
-
-      if (!audioContext || audioContext.state === 'closed') {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioContext.state === 'suspended') await audioContext.resume();
-
-      const startAt = audioContext.currentTime + 0.05;
-      const ringGain = audioContext.createGain();
-      ringGain.gain.setValueAtTime(0.0001, startAt);
-      ringGain.gain.exponentialRampToValueAtTime(0.22, startAt + 0.03);
-      ringGain.gain.setValueAtTime(0.22, startAt + 0.85);
-      ringGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.9);
-      ringGain.gain.setValueAtTime(0.0001, startAt + 1.2);
-      ringGain.gain.exponentialRampToValueAtTime(0.22, startAt + 1.23);
-      ringGain.gain.setValueAtTime(0.22, startAt + 2.08);
-      ringGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 2.13);
-      ringGain.connect(audioContext.destination);
-
-      // Classic telephone ring: two close tones played together.
-      ringSources = [440, 480].map(frequency => {
-        const oscillator = audioContext.createOscillator();
-        oscillator.type = 'sine';
-        oscillator.frequency.value = frequency;
-        oscillator.connect(ringGain);
-        oscillator.start(startAt);
-        oscillator.stop(startAt + 2.15);
-        return oscillator;
-      });
-
-      ringBtn.classList.add('ringing');
-      ringBtn.textContent = 'Stop Ring';
-      setStatus('Ringing on listener audio output...');
-      ringTimer = setTimeout(() => {
-        stopRing();
-        setStatus('Ring complete');
-      }, 2250);
     }
 
     function handleMessage(event) {

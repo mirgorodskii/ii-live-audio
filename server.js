@@ -1,10 +1,12 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
-const { WebSocketServer } = require('ws');
+const { WebSocket, WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const SOURCE_TOKEN = process.env.SOURCE_TOKEN || '';
+const RING_CONTROLLER_URL = process.env.RING_CONTROLLER_URL ||
+  'wss://ii-websocket-server-a9b7d506f512.herokuapp.com';
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +22,7 @@ let stats = {
   lastWarningAt: null
 };
 let currentHealthState = null;
+let ringRequest = null;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -31,6 +34,55 @@ app.get('/health', (req, res) => {
     currentHealthState,
     stats
   });
+});
+
+function triggerPhoneRing() {
+  if (ringRequest) return ringRequest;
+
+  ringRequest = new Promise((resolve, reject) => {
+    const remote = new WebSocket(RING_CONTROLLER_URL);
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { remote.close(); } catch {}
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error('Raspberry Pi ring controller did not respond')),
+      20000
+    );
+
+    remote.on('open', () => {
+      remote.send(JSON.stringify({ id: 'rpi_controller', message: 'trigger' }));
+    });
+    remote.on('message', raw => {
+      let message;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.id === 'rpi_status' && message.message === 'ok') {
+        finish(null, { ok: true, message: 'Phone speaker rang' });
+      }
+    });
+    remote.on('error', error => finish(error));
+    remote.on('close', () => {
+      if (!settled) finish(new Error('Raspberry Pi ring controller disconnected'));
+    });
+  }).finally(() => {
+    ringRequest = null;
+  });
+
+  return ringRequest;
+}
+
+app.post('/ring', async (req, res) => {
+  try {
+    const result = await triggerPhoneRing();
+    res.json(result);
+  } catch (error) {
+    res.status(503).json({ ok: false, error: error.message });
+  }
 });
 
 function sendJson(ws, payload) {
