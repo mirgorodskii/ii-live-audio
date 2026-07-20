@@ -24,6 +24,7 @@ let stats = {
 let currentHealthState = null;
 let currentScenarioState = null;
 let ringRequest = null;
+let relayRequest = null;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -132,6 +133,65 @@ app.post('/ring/volume', async (req, res) => {
   try {
     const result = await setPhoneRingVolume(level);
     return res.json(result);
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: error.message });
+  }
+});
+
+function controlRelay(command) {
+  if (relayRequest) return relayRequest;
+
+  relayRequest = new Promise((resolve, reject) => {
+    const remote = new WebSocket(RING_CONTROLLER_URL);
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { remote.close(); } catch {}
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error('Raspberry Pi relay controller did not respond')),
+      10000
+    );
+
+    remote.on('open', () => {
+      remote.send(JSON.stringify({ id: 'rpi_controller', message: `relay:${command}` }));
+    });
+    remote.on('message', raw => {
+      let message;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      const match = message.id === 'rpi_status' &&
+        /^relay_state:(on|off)$/.exec(message.message || '');
+      if (match) finish(null, { ok: true, state: match[1] });
+      else if (message.id === 'rpi_status' && message.message === 'relay_error') {
+        finish(new Error('Raspberry Pi could not switch the relay'));
+      }
+    });
+    remote.on('error', error => finish(error));
+    remote.on('close', () => {
+      if (!settled) finish(new Error('Raspberry Pi relay controller disconnected'));
+    });
+  }).finally(() => {
+    relayRequest = null;
+  });
+
+  return relayRequest;
+}
+
+app.get('/relay', async (req, res) => {
+  try {
+    return res.json(await controlRelay('get'));
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/relay/toggle', async (req, res) => {
+  try {
+    return res.json(await controlRelay('toggle'));
   } catch (error) {
     return res.status(503).json({ ok: false, error: error.message });
   }
