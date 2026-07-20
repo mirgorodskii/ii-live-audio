@@ -24,6 +24,7 @@ let stats = {
 let currentHealthState = null;
 let ringRequest = null;
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (req, res) => {
@@ -82,6 +83,56 @@ app.post('/ring', async (req, res) => {
     res.json(result);
   } catch (error) {
     res.status(503).json({ ok: false, error: error.message });
+  }
+});
+
+function setPhoneRingVolume(level) {
+  return new Promise((resolve, reject) => {
+    const remote = new WebSocket(RING_CONTROLLER_URL);
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { remote.close(); } catch {}
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error('Raspberry Pi volume controller did not respond')),
+      10000
+    );
+
+    remote.on('open', () => {
+      remote.send(JSON.stringify({ id: 'rpi_controller', message: `volume:${level}` }));
+    });
+    remote.on('message', raw => {
+      let message;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.id === 'rpi_status' && message.message === `volume_ok:${level}`) {
+        finish(null, { ok: true, level });
+      } else if (message.id === 'rpi_status' && message.message === `volume_error:${level}`) {
+        finish(new Error(`Raspberry Pi could not set ring volume to ${level}%`));
+      }
+    });
+    remote.on('error', error => finish(error));
+    remote.on('close', () => {
+      if (!settled) finish(new Error('Raspberry Pi volume controller disconnected'));
+    });
+  });
+}
+
+app.post('/ring/volume', async (req, res) => {
+  const level = Number(req.body?.level);
+  if (!Number.isInteger(level) || level < 0 || level > 100) {
+    return res.status(400).json({ ok: false, error: 'Volume must be an integer from 0 to 100' });
+  }
+
+  try {
+    const result = await setPhoneRingVolume(level);
+    return res.json(result);
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: error.message });
   }
 });
 

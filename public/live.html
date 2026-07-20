@@ -146,6 +146,10 @@
 
       <div class="row">
         <label>
+          Ring loudness: <span id="ringVolumeValue">75%</span>
+          <input id="ringVolume" type="range" min="0" max="100" value="75">
+        </label>
+        <label>
           Assistant volume
           <input id="assistantVolume" type="range" min="0" max="150" value="100">
         </label>
@@ -172,6 +176,8 @@
     const startBtn = document.getElementById('startBtn');
     const healthOnlyBtn = document.getElementById('healthOnlyBtn');
     const ringBtn = document.getElementById('ringBtn');
+    const ringVolume = document.getElementById('ringVolume');
+    const ringVolumeValue = document.getElementById('ringVolumeValue');
     const statusEl = document.getElementById('status');
     const assistantVolume = document.getElementById('assistantVolume');
     const userVolume = document.getElementById('userVolume');
@@ -189,6 +195,7 @@
     let volumeHandlersAttached = false;
     let lastHealth = null;
     let sourceConnected = false;
+    let ringVolumeTimer = null;
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
     const channels = {
@@ -341,6 +348,30 @@
       }
     }
 
+    async function saveRingVolume() {
+      const level = Number(ringVolume.value);
+      ringVolumeValue.textContent = `${level}%`;
+      try { localStorage.setItem('phoneRingVolume', String(level)); } catch {}
+      try {
+        const response = await fetch('/ring/volume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setStatus(`Ring loudness set to ${level}%`);
+      } catch (error) {
+        setStatus(`Ring volume failed: ${error.message}`);
+      }
+    }
+
+    function scheduleRingVolumeUpdate() {
+      ringVolumeValue.textContent = `${ringVolume.value}%`;
+      clearTimeout(ringVolumeTimer);
+      ringVolumeTimer = setTimeout(saveRingVolume, 250);
+    }
+
     function handleMessage(event) {
       let msg;
       try {
@@ -468,6 +499,17 @@
     startBtn.addEventListener('click', start);
     healthOnlyBtn.addEventListener('click', checkHealthOnly);
     ringBtn.addEventListener('click', ringUsbSpeaker);
+    try {
+      const savedRingVolume = localStorage.getItem('phoneRingVolume');
+      if (savedRingVolume !== null) {
+        const level = Number(savedRingVolume);
+        if (Number.isInteger(level) && level >= 0 && level <= 100) {
+          ringVolume.value = String(level);
+          ringVolumeValue.textContent = `${level}%`;
+        }
+      }
+    } catch {}
+    ringVolume.addEventListener('input', scheduleRingVolumeUpdate);
     setInterval(renderHealth, 30000);
   </script>
 </body>
