@@ -38,22 +38,27 @@
       flex-wrap: wrap;
     }
     button {
-      border: 0;
+      border: 1px solid #aaa;
       border-radius: 6px;
       padding: 12px 18px;
       font-size: 15px;
       font-weight: 650;
       cursor: pointer;
-      background: #f0f0f0;
-      color: #111;
+      background: transparent;
+      color: #eee;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    button:hover:not(:disabled) {
+      border-color: #fff;
+      background: rgba(255, 255, 255, .08);
     }
     button:disabled {
       opacity: .5;
       cursor: default;
     }
     #ringBtn {
-      background: #22c55e;
-      color: #071b0d;
+      border-color: #22c55e;
+      color: #86efac;
     }
     .status {
       color: #bbb;
@@ -124,6 +129,7 @@
       padding: 0;
       opacity: 0;
       background: transparent;
+      border: 0;
     }
     .secret-panel {
       position: fixed;
