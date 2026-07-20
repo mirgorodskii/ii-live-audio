@@ -119,6 +119,15 @@
     input[type="range"] {
       width: 220px;
     }
+    select {
+      min-width: 220px;
+      border: 1px solid #666;
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: #171717;
+      color: #eee;
+      font-size: 14px;
+    }
     .secret-hotspot {
       position: fixed;
       z-index: 20;
@@ -229,6 +238,29 @@
           <input id="ringVolume" type="range" min="0" max="100" value="75">
         </label>
       </div>
+
+      <div class="row">
+        <label>
+          Default scenario
+          <select id="defaultScenarioSelect">
+            <option value="0">1. The Phone</option><option value="1">2. The Elevator</option>
+            <option value="2">3. The Mirror</option><option value="3">4. The Basement</option>
+            <option value="4">5. The Forest</option><option value="5">6. The Hospital</option>
+            <option value="6">7. The Doll</option><option value="7">8. The Broadcast</option>
+            <option value="8">9. The Shadow</option><option value="9">10. The Dream</option>
+          </select>
+        </label>
+        <label>
+          Current scenario
+          <select id="currentScenarioSelect">
+            <option value="0">1. The Phone</option><option value="1">2. The Elevator</option>
+            <option value="2">3. The Mirror</option><option value="3">4. The Basement</option>
+            <option value="4">5. The Forest</option><option value="5">6. The Hospital</option>
+            <option value="6">7. The Doll</option><option value="7">8. The Broadcast</option>
+            <option value="8">9. The Shadow</option><option value="9">10. The Dream</option>
+          </select>
+        </label>
+      </div>
     </section>
 
   </main>
@@ -239,6 +271,8 @@
     const ringBtn = document.getElementById('ringBtn');
     const ringVolume = document.getElementById('ringVolume');
     const ringVolumeValue = document.getElementById('ringVolumeValue');
+    const defaultScenarioSelect = document.getElementById('defaultScenarioSelect');
+    const currentScenarioSelect = document.getElementById('currentScenarioSelect');
     const secretHotspot = document.getElementById('secretHotspot');
     const secretPanel = document.getElementById('secretPanel');
     const secretCloseBtn = document.getElementById('secretCloseBtn');
@@ -261,6 +295,8 @@
     let lastHealth = null;
     let sourceConnected = false;
     let ringVolumeTimer = null;
+    let lastScenarioState = null;
+    const pendingListenerMessages = [];
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
     const channels = {
@@ -486,6 +522,37 @@
       ringVolumeTimer = setTimeout(saveRingVolume, 250);
     }
 
+    function applyScenarioState(state) {
+      lastScenarioState = state;
+      if (Array.isArray(state.scenarios)) {
+        for (const select of [defaultScenarioSelect, currentScenarioSelect]) {
+          for (const scenario of state.scenarios) {
+            const option = select.querySelector(`option[value="${scenario.index}"]`);
+            if (option && scenario.label) option.textContent = scenario.label;
+          }
+        }
+      }
+      if (Number.isInteger(state.defaultIndex)) defaultScenarioSelect.value = String(state.defaultIndex);
+      if (Number.isInteger(state.currentIndex)) currentScenarioSelect.value = String(state.currentIndex);
+    }
+
+    function sendListenerMessage(message) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message));
+        return;
+      }
+      pendingListenerMessages.push(message);
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        connectListener({ enableAudio: false });
+      }
+    }
+
+    function changeRemoteScenario(mode, select) {
+      const index = Number(select.value);
+      setStatus(`Changing ${mode} scenario...`);
+      sendListenerMessage({ type: 'scenario_control', mode, index });
+    }
+
     function handleMessage(event) {
       let msg;
       try {
@@ -505,6 +572,17 @@
         sourceConnected = !!msg.connected;
         setStatus(msg.connected ? 'Live' : 'Phone disconnected');
         renderHealth();
+        return;
+      }
+
+      if (msg.type === 'scenario_state') {
+        applyScenarioState(msg);
+        return;
+      }
+
+      if (msg.type === 'scenario_control_result') {
+        setStatus(msg.message || (msg.ok ? 'Scenario updated' : 'Scenario change failed'));
+        if (!msg.ok && lastScenarioState) applyScenarioState(lastScenarioState);
         return;
       }
 
@@ -541,6 +619,10 @@
         setStatus(enableAudio ? 'Live' : 'Health only');
         return;
       }
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        audioEnabled = enableAudio;
+        return;
+      }
 
       startBtn.disabled = true;
       healthOnlyBtn.disabled = true;
@@ -550,7 +632,10 @@
       ws.onopen = () => {
         startBtn.disabled = false;
         healthOnlyBtn.disabled = false;
-        setStatus(enableAudio ? 'Connected. Waiting for phone audio...' : 'Connected. Health only.');
+        setStatus(audioEnabled ? 'Connected. Waiting for phone audio...' : 'Connected. Health only.');
+        while (pendingListenerMessages.length) {
+          ws.send(JSON.stringify(pendingListenerMessages.shift()));
+        }
       };
       ws.onclose = () => {
         setStatus('Disconnected');
@@ -599,6 +684,8 @@
     startBtn.addEventListener('click', start);
     healthOnlyBtn.addEventListener('click', checkHealthOnly);
     ringBtn.addEventListener('click', ringUsbSpeaker);
+    defaultScenarioSelect.addEventListener('change', () => changeRemoteScenario('default', defaultScenarioSelect));
+    currentScenarioSelect.addEventListener('change', () => changeRemoteScenario('current', currentScenarioSelect));
     secretHotspot.addEventListener('click', () => setSecretPanel(true));
     secretCloseBtn.addEventListener('click', () => setSecretPanel(false));
     document.addEventListener('keydown', event => {

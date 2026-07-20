@@ -22,6 +22,7 @@ let stats = {
   lastWarningAt: null
 };
 let currentHealthState = null;
+let currentScenarioState = null;
 let ringRequest = null;
 
 app.use(express.json());
@@ -197,6 +198,17 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'scenario_state') {
+        currentScenarioState = msg;
+        broadcast(msg);
+        return;
+      }
+
+      if (msg.type === 'scenario_control_result') {
+        broadcast(msg);
+        return;
+      }
+
       if (msg.type === 'health') {
         const event = {
           type: 'health',
@@ -244,6 +256,26 @@ wss.on('connection', (ws, req) => {
   if (currentHealthState) {
     sendJson(ws, currentHealthState);
   }
+  if (currentScenarioState) {
+    sendJson(ws, currentScenarioState);
+  }
+
+  ws.on('message', raw => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type !== 'scenario_control') return;
+
+    const index = Number(msg.index);
+    if (!['default', 'current'].includes(msg.mode) || !Number.isInteger(index) || index < 0 || index > 9) {
+      sendJson(ws, { type: 'scenario_control_result', ok: false, message: 'Invalid scenario command' });
+      return;
+    }
+    if (!source || source.readyState !== 1) {
+      sendJson(ws, { type: 'scenario_control_result', ok: false, message: 'Phone is not connected' });
+      return;
+    }
+    sendJson(source, { type: 'scenario_control', mode: msg.mode, index });
+  });
 
   broadcast({ type: 'listener_count', listeners: listeners.size });
   if (source) {
