@@ -237,7 +237,7 @@
 
       <div class="row">
         <label>
-          Ring loudness: <span id="ringVolumeValue">75%</span>
+          AI voice speaker loudness: <span id="ringVolumeValue">75%</span>
           <input id="ringVolume" type="range" min="0" max="100" value="75">
         </label>
       </div>
@@ -554,14 +554,14 @@
       ringVolumeValue.textContent = `${level}%`;
       try { localStorage.setItem('phoneRingVolume', String(level)); } catch {}
       try {
-        const response = await fetch('/ring/volume', {
+        const response = await fetch('/speaker/volume', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ level })
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-        setStatus(`Ring loudness set to ${level}%`);
+        setStatus(`AI voice speaker loudness set to ${level}%`);
       } catch (error) {
         setStatus(`Ring volume failed: ${error.message}`);
       }
@@ -571,6 +571,19 @@
       ringVolumeValue.textContent = `${ringVolume.value}%`;
       clearTimeout(ringVolumeTimer);
       ringVolumeTimer = setTimeout(saveRingVolume, 250);
+    }
+
+    async function loadSpeakerVolume() {
+      try {
+        const response = await fetch('/speaker/volume', { cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok) return;
+        const level = Number(result.level);
+        if (Number.isInteger(level) && level >= 0 && level <= 100) {
+          ringVolume.value = String(level);
+          ringVolumeValue.textContent = `${level}%`;
+        }
+      } catch {}
     }
 
     function applyScenarioState(state) {
@@ -635,6 +648,16 @@
 
       if (msg.type === 'scenario_state') {
         applyScenarioState(msg);
+        return;
+      }
+
+      if (msg.type === 'speaker_volume') {
+        const level = Number(msg.level);
+        if (Number.isInteger(level) && level >= 0 && level <= 100) {
+          ringVolume.value = String(level);
+          ringVolumeValue.textContent = `${level}%`;
+          try { localStorage.setItem('phoneRingVolume', String(level)); } catch {}
+        }
         return;
       }
 
@@ -781,6 +804,7 @@
       }
     } catch {}
     ringVolume.addEventListener('input', scheduleRingVolumeUpdate);
+    loadSpeakerVolume();
     relayRequest('/relay');
     setInterval(renderHealth, 30000);
   </script>

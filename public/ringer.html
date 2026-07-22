@@ -94,12 +94,31 @@
       line-height: 1.4;
       text-align: center;
     }
+    .speaker-control {
+      position: absolute;
+      left: 50%;
+      bottom: calc(max(24px, env(safe-area-inset-bottom)) + 68px);
+      width: min(320px, calc(100% - 48px));
+      transform: translateX(-50%);
+      display: grid;
+      gap: 8px;
+      color: #777;
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .speaker-control header { display: flex; justify-content: space-between; }
+    .speaker-control input { width: 100%; accent-color: #aaa; }
   </style>
 </head>
 <body>
   <main>
     <div id="healthStatus" class="health">RESTART PHONE</div>
     <button id="ringBtn">Ring the Phone</button>
+    <label class="speaker-control">
+      <header><span>AI voice speaker</span><span id="speakerVolumeValue">75%</span></header>
+      <input id="speakerVolume" type="range" min="0" max="100" value="75">
+    </label>
     <button id="restartBtn">Restart Phone</button>
     <div id="status" class="status">Checking phone...</div>
   </main>
@@ -109,10 +128,13 @@
     const healthStatus = document.getElementById('healthStatus');
     const ringBtn = document.getElementById('ringBtn');
     const restartBtn = document.getElementById('restartBtn');
+    const speakerVolume = document.getElementById('speakerVolume');
+    const speakerVolumeValue = document.getElementById('speakerVolumeValue');
     const statusEl = document.getElementById('status');
     let sourceConnected = false;
     let lastHealth = null;
     let ws = null;
+    let speakerVolumeTimer = null;
 
     function setStatus(message) { statusEl.textContent = message; }
 
@@ -149,6 +171,14 @@
         if (message.type === 'ready') sourceConnected = !!message.sourceConnected;
         else if (message.type === 'source_status') sourceConnected = !!message.connected;
         else if ((message.type === 'health' || message.type === 'warning') && message.kind === 'test') lastHealth = message;
+        else if (message.type === 'speaker_volume') {
+          const level = Number(message.level);
+          if (Number.isInteger(level) && level >= 0 && level <= 100) {
+            speakerVolume.value = String(level);
+            speakerVolumeValue.textContent = `${level}%`;
+          }
+          return;
+        }
         else return;
         renderHealth();
       };
@@ -198,9 +228,46 @@
       }
     }
 
+    async function saveSpeakerVolume() {
+      const level = Number(speakerVolume.value);
+      try {
+        const response = await fetch('/speaker/volume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setStatus(`AI voice speaker: ${level}%`);
+      } catch (error) {
+        setStatus(`Volume failed: ${error.message}`);
+      }
+    }
+
+    async function loadSpeakerVolume() {
+      try {
+        const response = await fetch('/speaker/volume', { cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok) return;
+        const level = Number(result.level);
+        if (Number.isInteger(level) && level >= 0 && level <= 100) {
+          speakerVolume.value = String(level);
+          speakerVolumeValue.textContent = `${level}%`;
+        }
+      } catch {}
+    }
+
+    function scheduleSpeakerVolume() {
+      speakerVolumeValue.textContent = `${speakerVolume.value}%`;
+      clearTimeout(speakerVolumeTimer);
+      speakerVolumeTimer = setTimeout(saveSpeakerVolume, 250);
+    }
+
     ringBtn.addEventListener('click', ringPhone);
     restartBtn.addEventListener('click', restartPhone);
+    speakerVolume.addEventListener('input', scheduleSpeakerVolume);
     loadHealth();
+    loadSpeakerVolume();
     connectStatus();
     setInterval(renderHealth, 30000);
   </script>

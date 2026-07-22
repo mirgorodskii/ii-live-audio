@@ -26,6 +26,7 @@ let currentScenarioState = null;
 let ringRequest = null;
 let relayRequest = null;
 let restartRequest = null;
+let speakerVolume = 75;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -133,6 +134,28 @@ app.post('/ring/volume', async (req, res) => {
 
   try {
     const result = await setPhoneRingVolume(level);
+    speakerVolume = result.level;
+    broadcast({ type: 'speaker_volume', level: speakerVolume });
+    return res.json(result);
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/speaker/volume', (req, res) => {
+  res.json({ ok: true, level: speakerVolume });
+});
+
+app.post('/speaker/volume', async (req, res) => {
+  const level = Number(req.body?.level);
+  if (!Number.isInteger(level) || level < 0 || level > 100) {
+    return res.status(400).json({ ok: false, error: 'Volume must be an integer from 0 to 100' });
+  }
+
+  try {
+    const result = await setPhoneRingVolume(level);
+    speakerVolume = result.level;
+    broadcast({ type: 'speaker_volume', level: speakerVolume });
     return res.json(result);
   } catch (error) {
     return res.status(503).json({ ok: false, error: error.message });
@@ -373,6 +396,7 @@ wss.on('connection', (ws, req) => {
   if (currentScenarioState) {
     sendJson(ws, currentScenarioState);
   }
+  sendJson(ws, { type: 'speaker_volume', level: speakerVolume });
 
   ws.on('message', raw => {
     let msg;
