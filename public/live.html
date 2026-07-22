@@ -304,6 +304,8 @@
     let ws = null;
     let audioContext = null;
     let audioEnabled = false;
+    let autoListen = true;
+    let listenerReconnectTimer = null;
     let lastHealth = null;
     let sourceConnected = false;
     let ringVolumeTimer = null;
@@ -775,6 +777,7 @@
 
       ws = new WebSocket(wsUrl());
       ws.onopen = () => {
+        clearTimeout(listenerReconnectTimer);
         startBtn.disabled = false;
         healthOnlyBtn.disabled = false;
         setStatus(audioEnabled ? 'Connected. Waiting for phone audio...' : 'Connected. Health only.');
@@ -783,12 +786,19 @@
         }
       };
       ws.onclose = () => {
-        setStatus('Disconnected');
+        setStatus(autoListen ? 'Reconnecting audio...' : 'Disconnected');
         startBtn.disabled = false;
         healthOnlyBtn.disabled = false;
         runHealthTestBtn.disabled = false;
         runHealthTestBtn.textContent = 'Run Health Test Now';
-        audioEnabled = false;
+        audioEnabled = autoListen;
+        if (autoListen) {
+          clearTimeout(listenerReconnectTimer);
+          listenerReconnectTimer = setTimeout(() => {
+            ws = null;
+            connectListener({ enableAudio: true });
+          }, 3000);
+        }
       };
       ws.onerror = () => setStatus('Connection error');
       ws.onmessage = handleMessage;
@@ -811,21 +821,34 @@
     }
 
     async function start() {
-      if (audioEnabled) return;
+      autoListen = true;
       if (!audioContext || audioContext.state === 'closed') {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
-      if (audioContext.state === 'suspended') await audioContext.resume();
+      if (audioContext.state === 'suspended') {
+        try { await audioContext.resume(); } catch {}
+      }
 
-      createChannelAudioGraph('assistant');
-      createChannelAudioGraph('user');
+      if (!channels.assistant.gain) createChannelAudioGraph('assistant');
+      if (!channels.user.gain) createChannelAudioGraph('user');
 
       connectListener({ enableAudio: true });
     }
 
     function checkHealthOnly() {
+      autoListen = false;
+      clearTimeout(listenerReconnectTimer);
       stopAudioPlayback();
       connectListener({ enableAudio: false });
+    }
+
+    async function unlockAutoAudio() {
+      if (!autoListen) return;
+      await start();
+      if (audioContext?.state === 'running') {
+        document.removeEventListener('pointerdown', unlockAutoAudio);
+        document.removeEventListener('touchstart', unlockAutoAudio);
+      }
     }
 
     startBtn.addEventListener('click', start);
@@ -860,6 +883,9 @@
     loadAiVoiceVolume();
     relayRequest('/relay');
     setInterval(renderHealth, 30000);
+    document.addEventListener('pointerdown', unlockAutoAudio);
+    document.addEventListener('touchstart', unlockAutoAudio, { passive: true });
+    start().catch(error => setStatus(`Audio start failed: ${error.message}`));
   </script>
 </body>
 </html>
