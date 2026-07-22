@@ -490,14 +490,18 @@
       source.connect(state.gain);
 
       const backlog = Math.max(0, (state.nextTime || 0) - audioContext.currentTime);
-      if (backlog > MAX_PLAYBACK_BACKLOG_SECONDS && !state.preserveBacklog) {
+      if (
+        channelName !== 'assistant' &&
+        backlog > MAX_PLAYBACK_BACKLOG_SECONDS &&
+        !state.preserveBacklog
+      ) {
         for (const queuedSource of state.sources) {
           try { queuedSource.stop(); } catch {}
         }
         state.sources.clear();
         state.nextTime = audioContext.currentTime + 0.04;
         setStatus('Live (dropped delayed audio)');
-      } else if (backlog > 0.5) {
+      } else if (channelName !== 'assistant' && backlog > 0.5) {
         source.playbackRate.value = 1.08;
       }
 
