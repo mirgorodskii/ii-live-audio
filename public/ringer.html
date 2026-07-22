@@ -133,6 +133,7 @@
 
   <script>
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
+    const OFFLINE_GRACE_MS = 15000;
     const healthStatus = document.getElementById('healthStatus');
     const ringBtn = document.getElementById('ringBtn');
     const restartBtn = document.getElementById('restartBtn');
@@ -146,6 +147,7 @@
     let ws = null;
     let speakerVolumeTimer = null;
     let aiVoiceVolumeTimer = null;
+    let offlineSince = null;
 
     function setStatus(message) { statusEl.textContent = message; }
 
@@ -153,10 +155,15 @@
       const timestamp = lastHealth ? new Date(lastHealth.at).getTime() : NaN;
       const stale = Number.isNaN(timestamp) || Date.now() - timestamp > HEALTH_STALE_AFTER_MS;
       const ok = sourceConnected && !stale && lastHealth?.type === 'health' && lastHealth.ok;
-      healthStatus.textContent = ok ? 'HEALTH: OK' : 'RESTART PHONE';
+      const confirmedFailure = !stale && lastHealth?.type === 'warning' && lastHealth?.kind === 'test';
+      const offlineTooLong = !sourceConnected && offlineSince && Date.now() - offlineSince >= OFFLINE_GRACE_MS;
+      const needsRestart = confirmedFailure || offlineTooLong;
+      healthStatus.textContent = ok ? 'HEALTH: OK' : needsRestart ? 'RESTART PHONE' : 'CHECKING…';
       healthStatus.classList.toggle('ok', ok);
       if (ok) setStatus(`Last test: ${new Date(lastHealth.at).toLocaleString()}`);
-      else if (!sourceConnected) setStatus('Phone is offline');
+      else if (!sourceConnected && !offlineTooLong) setStatus('Reconnecting to phone...');
+      else if (!sourceConnected) setStatus('Phone has been offline for more than 15 seconds');
+      else if (!lastHealth || stale) setStatus('Waiting for health test...');
       else if (lastHealth) setStatus(lastHealth.message || 'Health test failed or expired');
       else setStatus('No health test result');
     }
@@ -166,6 +173,7 @@
         const response = await fetch('/health', { cache: 'no-store' });
         const data = await response.json();
         sourceConnected = !!data.sourceConnected;
+        offlineSince = sourceConnected ? null : (offlineSince || Date.now());
         lastHealth = data.currentHealthState || null;
       } catch {
         sourceConnected = false;
@@ -179,8 +187,14 @@
       ws.onmessage = event => {
         let message;
         try { message = JSON.parse(event.data); } catch { return; }
-        if (message.type === 'ready') sourceConnected = !!message.sourceConnected;
-        else if (message.type === 'source_status') sourceConnected = !!message.connected;
+        if (message.type === 'ready') {
+          sourceConnected = !!message.sourceConnected;
+          offlineSince = sourceConnected ? null : (offlineSince || Date.now());
+        }
+        else if (message.type === 'source_status') {
+          sourceConnected = !!message.connected;
+          offlineSince = sourceConnected ? null : (offlineSince || Date.now());
+        }
         else if ((message.type === 'health' || message.type === 'warning') && message.kind === 'test') lastHealth = message;
         else if (message.type === 'speaker_volume') {
           const level = Number(message.level);
@@ -203,7 +217,9 @@
       };
       ws.onclose = () => {
         sourceConnected = false;
+        offlineSince = offlineSince || Date.now();
         renderHealth();
+        setTimeout(renderHealth, OFFLINE_GRACE_MS + 100);
         setTimeout(connectStatus, 5000);
       };
     }
@@ -235,6 +251,7 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
         sourceConnected = false;
+        offlineSince = Date.now();
         renderHealth();
         setStatus(result.message || 'Restart accepted');
       } catch (error) {

@@ -28,6 +28,7 @@ let relayRequest = null;
 let restartRequest = null;
 let speakerVolume = 75;
 let aiVoiceVolume = 75;
+let sourceHealthTimer = null;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -363,6 +364,13 @@ wss.on('connection', (ws, req) => {
     broadcast({ type: 'source_status', connected: true });
     sendJson(ws, { type: 'ready', role: 'source', listeners: listeners.size });
 
+    clearTimeout(sourceHealthTimer);
+    sourceHealthTimer = setTimeout(() => {
+      if (source === ws && ws.readyState === 1) {
+        sendJson(ws, { type: 'health_control' });
+      }
+    }, 5000);
+
     ws.on('message', (raw) => {
       let msg;
       try {
@@ -430,6 +438,8 @@ wss.on('connection', (ws, req) => {
 
     ws.on('close', () => {
       if (source === ws) {
+        clearTimeout(sourceHealthTimer);
+        sourceHealthTimer = null;
         source = null;
         broadcast({ type: 'source_status', connected: false });
       }
