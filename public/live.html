@@ -779,6 +779,14 @@
         return;
       }
 
+      if (msg.type === 'handset_state') {
+        if (!msg.lifted) {
+          stopAssistantPlayback();
+          setStatus('Handset down. AI playback stopped.');
+        }
+        return;
+      }
+
       if (msg.type === 'audio') {
         playPcm16(msg.channel, msg.audio, msg.sampleRate);
       }
@@ -848,6 +856,20 @@
       pendingAudioChunks = [];
       updateMeter('assistant', 0);
       updateMeter('user', 0);
+    }
+
+    function stopAssistantPlayback() {
+      const state = channels.assistant;
+      for (const source of state.sources) {
+        try { source.stop(); } catch {}
+      }
+      state.sources.clear();
+      state.nextTime = 0;
+      state.preserveBacklog = false;
+      pendingAudioChunks = pendingAudioChunks.filter(
+        chunk => chunk.channelName !== 'assistant'
+      );
+      updateMeter('assistant', 0);
     }
 
     function requestAudioResume() {

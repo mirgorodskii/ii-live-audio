@@ -424,6 +424,17 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'handset_state') {
+        const event = {
+          type: 'handset_state',
+          lifted: !!msg.lifted,
+          at: msg.at || new Date().toISOString()
+        };
+        if (!event.lifted) recentAssistantAudio = [];
+        broadcast(event);
+        return;
+      }
+
       if (msg.type !== 'audio' || !msg.audio || !msg.channel) return;
 
       if (msg.channel === 'assistant') stats.assistantChunks++;
