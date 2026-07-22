@@ -107,7 +107,10 @@
       letter-spacing: .1em;
       text-transform: uppercase;
     }
-    .speaker-control.ai { bottom: calc(max(24px, env(safe-area-inset-bottom)) + 124px); }
+    .speaker-control.ai {
+      top: calc(max(24px, env(safe-area-inset-top)) + 42px);
+      bottom: auto;
+    }
     .speaker-control header { display: flex; justify-content: space-between; }
     .speaker-control input { width: 100%; accent-color: #aaa; }
   </style>
