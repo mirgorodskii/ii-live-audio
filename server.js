@@ -331,6 +331,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'health_control_result') {
+        broadcast(msg);
+        return;
+      }
+
       if (msg.type !== 'audio' || !msg.audio || !msg.channel) return;
 
       if (msg.channel === 'assistant') stats.assistantChunks++;
@@ -372,6 +377,14 @@ wss.on('connection', (ws, req) => {
   ws.on('message', raw => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type === 'health_control') {
+      if (!source || source.readyState !== 1) {
+        sendJson(ws, { type: 'health_control_result', ok: false, message: 'Phone is not connected' });
+        return;
+      }
+      sendJson(source, { type: 'health_control' });
+      return;
+    }
     if (msg.type !== 'scenario_control') return;
 
     const index = Number(msg.index);

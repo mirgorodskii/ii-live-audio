@@ -221,6 +221,7 @@
       <div class="row">
         <button id="startBtn">Start</button>
         <button id="healthOnlyBtn">View Health Status Only</button>
+        <button id="runHealthTestBtn">Run Health Test Now</button>
         <button id="ringBtn">Ring Phone Speaker</button>
         <button id="relayBtn" aria-pressed="false">Relay: Off</button>
         <button id="restartBtn">Restart Phone Server</button>
@@ -270,6 +271,7 @@
   <script>
     const startBtn = document.getElementById('startBtn');
     const healthOnlyBtn = document.getElementById('healthOnlyBtn');
+    const runHealthTestBtn = document.getElementById('runHealthTestBtn');
     const ringBtn = document.getElementById('ringBtn');
     const relayBtn = document.getElementById('relayBtn');
     const restartBtn = document.getElementById('restartBtn');
@@ -602,6 +604,13 @@
       sendListenerMessage({ type: 'scenario_control', mode, index });
     }
 
+    function runHealthTestNow() {
+      runHealthTestBtn.disabled = true;
+      runHealthTestBtn.textContent = 'Testing...';
+      setStatus('Requesting immediate health test...');
+      sendListenerMessage({ type: 'health_control' });
+    }
+
     function handleMessage(event) {
       let msg;
       try {
@@ -635,10 +644,21 @@
         return;
       }
 
+      if (msg.type === 'health_control_result') {
+        setStatus(msg.message || (msg.ok ? 'Health test queued' : 'Health test could not start'));
+        if (!msg.ok) {
+          runHealthTestBtn.disabled = false;
+          runHealthTestBtn.textContent = 'Run Health Test Now';
+        }
+        return;
+      }
+
       if (msg.type === 'warning') {
         if (msg.kind === 'test') {
           lastHealth = msg;
           renderHealth();
+          runHealthTestBtn.disabled = false;
+          runHealthTestBtn.textContent = 'Run Health Test Now';
         } else {
           showWarning(msg.message || 'Phone status warning', msg.at);
         }
@@ -649,6 +669,8 @@
         if (msg.kind === 'test') {
           lastHealth = msg;
           renderHealth();
+          runHealthTestBtn.disabled = false;
+          runHealthTestBtn.textContent = 'Run Health Test Now';
         } else {
           setStatus(msg.message || 'Phone status ok');
         }
@@ -690,6 +712,8 @@
         setStatus('Disconnected');
         startBtn.disabled = false;
         healthOnlyBtn.disabled = false;
+        runHealthTestBtn.disabled = false;
+        runHealthTestBtn.textContent = 'Run Health Test Now';
         audioEnabled = false;
       };
       ws.onerror = () => setStatus('Connection error');
@@ -732,6 +756,7 @@
 
     startBtn.addEventListener('click', start);
     healthOnlyBtn.addEventListener('click', checkHealthOnly);
+    runHealthTestBtn.addEventListener('click', runHealthTestNow);
     ringBtn.addEventListener('click', ringUsbSpeaker);
     relayBtn.addEventListener('click', toggleRelay);
     restartBtn.addEventListener('click', restartPhoneServer);
