@@ -23,6 +23,7 @@ let stats = {
 };
 let currentHealthState = null;
 let currentScenarioState = null;
+let currentHandsetState = null;
 let ringRequest = null;
 let relayRequest = null;
 let restartRequest = null;
@@ -430,12 +431,14 @@ wss.on('connection', (ws, req) => {
           lifted: !!msg.lifted,
           at: msg.at || new Date().toISOString()
         };
+        currentHandsetState = event;
         if (!event.lifted) recentAssistantAudio = [];
         broadcast(event);
         return;
       }
 
       if (msg.type !== 'audio' || !msg.audio || !msg.channel) return;
+      if (msg.channel === 'assistant' && currentHandsetState?.lifted === false) return;
 
       if (msg.channel === 'assistant') stats.assistantChunks++;
       if (msg.channel === 'user') stats.userChunks++;
@@ -483,6 +486,9 @@ wss.on('connection', (ws, req) => {
   }
   if (currentScenarioState) {
     sendJson(ws, currentScenarioState);
+  }
+  if (currentHandsetState) {
+    sendJson(ws, currentHandsetState);
   }
   sendJson(ws, { type: 'speaker_volume', level: speakerVolume });
   sendJson(ws, { type: 'ai_voice_volume', level: aiVoiceVolume });
