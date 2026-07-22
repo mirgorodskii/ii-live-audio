@@ -97,7 +97,8 @@
     .speaker-control {
       position: absolute;
       left: 50%;
-      bottom: calc(max(24px, env(safe-area-inset-bottom)) + 68px);
+      top: calc(50% + min(31vw, 135px) + 88px);
+      bottom: auto;
       width: min(320px, calc(100% - 48px));
       transform: translateX(-50%);
       display: grid;
@@ -108,11 +109,44 @@
       text-transform: uppercase;
     }
     .speaker-control.ai {
-      top: calc(max(24px, env(safe-area-inset-top)) + 42px);
+      top: calc(50% + min(31vw, 135px) + 28px);
       bottom: auto;
     }
     .speaker-control header { display: flex; justify-content: space-between; }
-    .speaker-control input { width: 100%; accent-color: #aaa; }
+    .speaker-control input {
+      width: 100%;
+      height: 26px;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    .speaker-control input::-webkit-slider-runnable-track {
+      height: 1px;
+      background: #777;
+    }
+    .speaker-control input::-webkit-slider-thumb {
+      width: 22px;
+      height: 22px;
+      margin-top: -10.5px;
+      border: 1px solid #bbb;
+      border-radius: 50%;
+      background: #eee;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .speaker-control input::-moz-range-track {
+      height: 1px;
+      background: #777;
+    }
+    .speaker-control input::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      border: 1px solid #bbb;
+      border-radius: 50%;
+      background: #eee;
+    }
   </style>
 </head>
 <body>
