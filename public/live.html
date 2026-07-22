@@ -306,6 +306,8 @@
     let audioEnabled = false;
     let autoListen = true;
     let listenerReconnectTimer = null;
+    let hasConnectedOnce = false;
+    let pendingAudioChunks = [];
     let lastHealth = null;
     let sourceConnected = false;
     let ringVolumeTimer = null;
@@ -314,9 +316,10 @@
     const pendingListenerMessages = [];
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
+    const PENDING_AUDIO_WINDOW_MS = 20000;
     const channels = {
-      assistant: { nextTime: 0, gain: null, sources: new Set() },
-      user: { nextTime: 0, gain: null, sources: new Set() }
+      assistant: { nextTime: 0, gain: null, sources: new Set(), preserveBacklog: false },
+      user: { nextTime: 0, gain: null, sources: new Set(), preserveBacklog: false }
     };
 
     function setSecretPanel(open) {
@@ -370,7 +373,7 @@
 
     function wsUrl() {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${proto}//${location.host}/ws?role=listener`;
+      return `${proto}//${location.host}/ws?role=listener&replay=${hasConnectedOnce ? '0' : '1'}`;
     }
 
     function setStatus(text) {
@@ -460,6 +463,15 @@
       const state = channels[channelName];
       if (!state || !audioContext) return;
 
+      if (audioContext.state !== 'running') {
+        const now = Date.now();
+        pendingAudioChunks.push({ channelName, b64, sampleRate, receivedAt: now });
+        pendingAudioChunks = pendingAudioChunks.filter(
+          chunk => now - chunk.receivedAt <= PENDING_AUDIO_WINDOW_MS
+        );
+        return;
+      }
+
       const bytes = base64ToBytes(b64);
       const sampleCount = Math.floor(bytes.length / 2);
       if (!sampleCount) return;
@@ -478,7 +490,7 @@
       source.connect(state.gain);
 
       const backlog = Math.max(0, (state.nextTime || 0) - audioContext.currentTime);
-      if (backlog > MAX_PLAYBACK_BACKLOG_SECONDS) {
+      if (backlog > MAX_PLAYBACK_BACKLOG_SECONDS && !state.preserveBacklog) {
         for (const queuedSource of state.sources) {
           try { queuedSource.stop(); } catch {}
         }
@@ -493,7 +505,10 @@
       source.start(startAt);
       state.nextTime = startAt + (buffer.duration / source.playbackRate.value);
       state.sources.add(source);
-      source.onended = () => state.sources.delete(source);
+      source.onended = () => {
+        state.sources.delete(source);
+        if (state.sources.size === 0) state.preserveBacklog = false;
+      };
     }
 
     async function ringUsbSpeaker() {
@@ -777,6 +792,7 @@
 
       ws = new WebSocket(wsUrl());
       ws.onopen = () => {
+        hasConnectedOnce = true;
         clearTimeout(listenerReconnectTimer);
         startBtn.disabled = false;
         healthOnlyBtn.disabled = false;
@@ -813,9 +829,12 @@
       channels.assistant.nextTime = 0;
       channels.assistant.gain = null;
       channels.assistant.sources.clear();
+      channels.assistant.preserveBacklog = false;
       channels.user.nextTime = 0;
       channels.user.gain = null;
       channels.user.sources.clear();
+      channels.user.preserveBacklog = false;
+      pendingAudioChunks = [];
       updateMeter('assistant', 0);
       updateMeter('user', 0);
     }
@@ -833,6 +852,19 @@
       if (!channels.user.gain) createChannelAudioGraph('user');
 
       connectListener({ enableAudio: true });
+      flushPendingAudio();
+    }
+
+    function flushPendingAudio() {
+      if (!audioContext || audioContext.state !== 'running' || !pendingAudioChunks.length) return;
+      const queued = pendingAudioChunks;
+      pendingAudioChunks = [];
+      for (const channelName of new Set(queued.map(chunk => chunk.channelName))) {
+        if (channels[channelName]) channels[channelName].preserveBacklog = true;
+      }
+      for (const chunk of queued) {
+        playPcm16(chunk.channelName, chunk.b64, chunk.sampleRate);
+      }
     }
 
     function checkHealthOnly() {

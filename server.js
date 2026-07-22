@@ -29,6 +29,8 @@ let restartRequest = null;
 let speakerVolume = 75;
 let aiVoiceVolume = 75;
 let sourceHealthTimer = null;
+let recentAssistantAudio = [];
+const ASSISTANT_REPLAY_WINDOW_MS = 20000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -428,12 +430,22 @@ wss.on('connection', (ws, req) => {
       if (msg.channel === 'user') stats.userChunks++;
       stats.lastAudioAt = new Date().toISOString();
 
-      broadcast({
+      const audioEvent = {
         type: 'audio',
         channel: msg.channel,
         sampleRate: msg.sampleRate || 24000,
         audio: msg.audio
-      });
+      };
+
+      if (msg.channel === 'assistant') {
+        const now = Date.now();
+        recentAssistantAudio.push({ at: now, event: audioEvent });
+        recentAssistantAudio = recentAssistantAudio.filter(
+          entry => now - entry.at <= ASSISTANT_REPLAY_WINDOW_MS
+        );
+      }
+
+      broadcast(audioEvent);
     });
 
     ws.on('close', () => {
@@ -463,6 +475,12 @@ wss.on('connection', (ws, req) => {
   }
   sendJson(ws, { type: 'speaker_volume', level: speakerVolume });
   sendJson(ws, { type: 'ai_voice_volume', level: aiVoiceVolume });
+  if (url.searchParams.get('replay') === '1') {
+    const cutoff = Date.now() - ASSISTANT_REPLAY_WINDOW_MS;
+    for (const entry of recentAssistantAudio) {
+      if (entry.at >= cutoff) sendJson(ws, entry.event);
+    }
+  }
 
   ws.on('message', raw => {
     let msg;
