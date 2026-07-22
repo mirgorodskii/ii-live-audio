@@ -25,6 +25,7 @@ let currentHealthState = null;
 let currentScenarioState = null;
 let ringRequest = null;
 let relayRequest = null;
+let restartRequest = null;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -192,6 +193,54 @@ app.get('/relay', async (req, res) => {
 app.post('/relay/toggle', async (req, res) => {
   try {
     return res.json(await controlRelay('toggle'));
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: error.message });
+  }
+});
+
+function restartPhoneStack() {
+  if (restartRequest) return restartRequest;
+
+  restartRequest = new Promise((resolve, reject) => {
+    const remote = new WebSocket(RING_CONTROLLER_URL);
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { remote.close(); } catch {}
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error('Raspberry Pi restart controller did not respond')),
+      10000
+    );
+
+    remote.on('open', () => {
+      remote.send(JSON.stringify({ id: 'rpi_controller', message: 'restart' }));
+    });
+    remote.on('message', raw => {
+      let message;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.id === 'rpi_status' && message.message === 'restart_accepted') {
+        finish(null, { ok: true, message: 'Restart accepted; run.sh is starting' });
+      }
+    });
+    remote.on('error', error => finish(error));
+    remote.on('close', () => {
+      if (!settled) finish(new Error('Raspberry Pi restart controller disconnected'));
+    });
+  }).finally(() => {
+    restartRequest = null;
+  });
+
+  return restartRequest;
+}
+
+app.post('/restart', async (req, res) => {
+  try {
+    return res.json(await restartPhoneStack());
   } catch (error) {
     return res.status(503).json({ ok: false, error: error.message });
   }

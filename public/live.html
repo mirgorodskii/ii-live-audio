@@ -223,6 +223,7 @@
         <button id="healthOnlyBtn">View Health Status Only</button>
         <button id="ringBtn">Ring Phone Speaker</button>
         <button id="relayBtn" aria-pressed="false">Relay: Off</button>
+        <button id="restartBtn">Restart Phone Server</button>
         <div class="status" id="status">Disconnected</div>
       </div>
 
@@ -271,6 +272,7 @@
     const healthOnlyBtn = document.getElementById('healthOnlyBtn');
     const ringBtn = document.getElementById('ringBtn');
     const relayBtn = document.getElementById('relayBtn');
+    const restartBtn = document.getElementById('restartBtn');
     const ringVolume = document.getElementById('ringVolume');
     const ringVolumeValue = document.getElementById('ringVolumeValue');
     const defaultScenarioSelect = document.getElementById('defaultScenarioSelect');
@@ -525,6 +527,26 @@
       return relayRequest('/relay/toggle', 'POST');
     }
 
+    async function restartPhoneServer() {
+      if (!confirm('Restart the Raspberry Pi phone server now? The call will disconnect temporarily.')) return;
+      restartBtn.disabled = true;
+      restartBtn.textContent = 'Restarting...';
+      setStatus('Sending restart command to Raspberry Pi...');
+      try {
+        const response = await fetch('/restart', { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setStatus(result.message || 'Restart accepted. Reconnection may take a minute.');
+      } catch (error) {
+        setStatus(`Restart failed: ${error.message}`);
+      } finally {
+        setTimeout(() => {
+          restartBtn.disabled = false;
+          restartBtn.textContent = 'Restart Phone Server';
+        }, 15000);
+      }
+    }
+
     async function saveRingVolume() {
       const level = Number(ringVolume.value);
       ringVolumeValue.textContent = `${level}%`;
@@ -712,6 +734,7 @@
     healthOnlyBtn.addEventListener('click', checkHealthOnly);
     ringBtn.addEventListener('click', ringUsbSpeaker);
     relayBtn.addEventListener('click', toggleRelay);
+    restartBtn.addEventListener('click', restartPhoneServer);
     defaultScenarioSelect.addEventListener('change', () => changeRemoteScenario('default', defaultScenarioSelect));
     currentScenarioSelect.addEventListener('change', () => changeRemoteScenario('current', currentScenarioSelect));
     secretHotspot.addEventListener('click', () => setSecretPanel(true));
