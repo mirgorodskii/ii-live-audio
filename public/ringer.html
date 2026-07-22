@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ringer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(440px, 100%);
+      display: grid;
+      gap: 14px;
+    }
+    .panel {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #1c1c1c;
+    }
+    .health {
+      min-height: 92px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #555;
+      border-radius: 6px;
+      color: #fde68a;
+      font-size: clamp(24px, 8vw, 36px);
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-align: center;
+    }
+    .health.ok {
+      border-color: #22c55e;
+      color: #86efac;
+    }
+    button {
+      width: 100%;
+      min-height: 58px;
+      padding: 12px 18px;
+      border: 1px solid #aaa;
+      border-radius: 6px;
+      background: transparent;
+      color: #eee;
+      font-size: 16px;
+      font-weight: 650;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    button:hover:not(:disabled) {
+      border-color: #fff;
+      background: rgba(255, 255, 255, .08);
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    #ringBtn { border-color: #22c55e; color: #86efac; }
+    #restartBtn { border-color: #f59e0b; color: #fde68a; }
+    .status {
+      min-height: 20px;
+      color: #bbb;
+      font-size: 13px;
+      line-height: 1.4;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <div id="healthStatus" class="health">RESTART PHONE</div>
+      <button id="ringBtn">Ring Phone</button>
+      <button id="restartBtn">Restart Phone</button>
+      <div id="status" class="status">Checking phone...</div>
+    </section>
+  </main>
+
+  <script>
+    const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
+    const healthStatus = document.getElementById('healthStatus');
+    const ringBtn = document.getElementById('ringBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const statusEl = document.getElementById('status');
+    let sourceConnected = false;
+    let lastHealth = null;
+    let ws = null;
+
+    function setStatus(message) { statusEl.textContent = message; }
+
+    function renderHealth() {
+      const timestamp = lastHealth ? new Date(lastHealth.at).getTime() : NaN;
+      const stale = Number.isNaN(timestamp) || Date.now() - timestamp > HEALTH_STALE_AFTER_MS;
+      const ok = sourceConnected && !stale && lastHealth?.type === 'health' && lastHealth.ok;
+      healthStatus.textContent = ok ? 'HEALTH: OK' : 'RESTART PHONE';
+      healthStatus.classList.toggle('ok', ok);
+      if (ok) setStatus(`Last test: ${new Date(lastHealth.at).toLocaleString()}`);
+      else if (!sourceConnected) setStatus('Phone is offline');
+      else if (lastHealth) setStatus(lastHealth.message || 'Health test failed or expired');
+      else setStatus('No health test result');
+    }
+
+    async function loadHealth() {
+      try {
+        const response = await fetch('/health', { cache: 'no-store' });
+        const data = await response.json();
+        sourceConnected = !!data.sourceConnected;
+        lastHealth = data.currentHealthState || null;
+      } catch {
+        sourceConnected = false;
+      }
+      renderHealth();
+    }
+
+    function connectStatus() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${location.host}/ws?role=listener`);
+      ws.onmessage = event => {
+        let message;
+        try { message = JSON.parse(event.data); } catch { return; }
+        if (message.type === 'ready') sourceConnected = !!message.sourceConnected;
+        else if (message.type === 'source_status') sourceConnected = !!message.connected;
+        else if ((message.type === 'health' || message.type === 'warning') && message.kind === 'test') lastHealth = message;
+        else return;
+        renderHealth();
+      };
+      ws.onclose = () => {
+        sourceConnected = false;
+        renderHealth();
+        setTimeout(connectStatus, 5000);
+      };
+    }
+
+    async function ringPhone() {
+      ringBtn.disabled = true;
+      ringBtn.textContent = 'Ringing...';
+      setStatus('Sending ring command...');
+      try {
+        const response = await fetch('/ring', { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setStatus(result.message || 'Phone rang');
+      } catch (error) {
+        setStatus(`Ring failed: ${error.message}`);
+      } finally {
+        ringBtn.disabled = false;
+        ringBtn.textContent = 'Ring Phone';
+      }
+    }
+
+    async function restartPhone() {
+      if (!confirm('Restart the Raspberry Pi phone now?')) return;
+      restartBtn.disabled = true;
+      restartBtn.textContent = 'Restarting...';
+      setStatus('Sending restart command...');
+      try {
+        const response = await fetch('/restart', { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        sourceConnected = false;
+        renderHealth();
+        setStatus(result.message || 'Restart accepted');
+      } catch (error) {
+        setStatus(`Restart failed: ${error.message}`);
+      } finally {
+        setTimeout(() => {
+          restartBtn.disabled = false;
+          restartBtn.textContent = 'Restart Phone';
+        }, 15000);
+      }
+    }
+
+    ringBtn.addEventListener('click', ringPhone);
+    restartBtn.addEventListener('click', restartPhone);
+    loadHealth();
+    connectStatus();
+    setInterval(renderHealth, 30000);
+  </script>
+</body>
+</html>
