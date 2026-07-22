@@ -237,8 +237,12 @@
 
       <div class="row">
         <label>
-          AI voice speaker loudness: <span id="ringVolumeValue">75%</span>
+          Ring speaker loudness: <span id="ringVolumeValue">75%</span>
           <input id="ringVolume" type="range" min="0" max="100" value="75">
+        </label>
+        <label>
+          AI voice speaker loudness: <span id="aiVoiceVolumeValue">75%</span>
+          <input id="aiVoiceVolume" type="range" min="0" max="100" value="75">
         </label>
       </div>
 
@@ -277,6 +281,8 @@
     const restartBtn = document.getElementById('restartBtn');
     const ringVolume = document.getElementById('ringVolume');
     const ringVolumeValue = document.getElementById('ringVolumeValue');
+    const aiVoiceVolume = document.getElementById('aiVoiceVolume');
+    const aiVoiceVolumeValue = document.getElementById('aiVoiceVolumeValue');
     const defaultScenarioSelect = document.getElementById('defaultScenarioSelect');
     const currentScenarioSelect = document.getElementById('currentScenarioSelect');
     const secretHotspot = document.getElementById('secretHotspot');
@@ -301,6 +307,7 @@
     let lastHealth = null;
     let sourceConnected = false;
     let ringVolumeTimer = null;
+    let aiVoiceVolumeTimer = null;
     let lastScenarioState = null;
     const pendingListenerMessages = [];
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
@@ -561,10 +568,45 @@
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-        setStatus(`AI voice speaker loudness set to ${level}%`);
+        setStatus(`Ring speaker loudness set to ${level}%`);
       } catch (error) {
         setStatus(`Ring volume failed: ${error.message}`);
       }
+    }
+
+    async function saveAiVoiceVolume() {
+      const level = Number(aiVoiceVolume.value);
+      aiVoiceVolumeValue.textContent = `${level}%`;
+      try {
+        const response = await fetch('/ai/volume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setStatus(`AI voice speaker loudness set to ${level}%`);
+      } catch (error) {
+        setStatus(`AI voice volume failed: ${error.message}`);
+      }
+    }
+
+    function scheduleAiVoiceVolumeUpdate() {
+      aiVoiceVolumeValue.textContent = `${aiVoiceVolume.value}%`;
+      clearTimeout(aiVoiceVolumeTimer);
+      aiVoiceVolumeTimer = setTimeout(saveAiVoiceVolume, 250);
+    }
+
+    async function loadAiVoiceVolume() {
+      try {
+        const response = await fetch('/ai/volume', { cache: 'no-store' });
+        const result = await response.json();
+        const level = Number(result.level);
+        if (response.ok && Number.isInteger(level) && level >= 0 && level <= 100) {
+          aiVoiceVolume.value = String(level);
+          aiVoiceVolumeValue.textContent = `${level}%`;
+        }
+      } catch {}
     }
 
     function scheduleRingVolumeUpdate() {
@@ -657,6 +699,15 @@
           ringVolume.value = String(level);
           ringVolumeValue.textContent = `${level}%`;
           try { localStorage.setItem('phoneRingVolume', String(level)); } catch {}
+        }
+        return;
+      }
+
+      if (msg.type === 'ai_voice_volume') {
+        const level = Number(msg.level);
+        if (Number.isInteger(level) && level >= 0 && level <= 100) {
+          aiVoiceVolume.value = String(level);
+          aiVoiceVolumeValue.textContent = `${level}%`;
         }
         return;
       }
@@ -804,7 +855,9 @@
       }
     } catch {}
     ringVolume.addEventListener('input', scheduleRingVolumeUpdate);
+    aiVoiceVolume.addEventListener('input', scheduleAiVoiceVolumeUpdate);
     loadSpeakerVolume();
+    loadAiVoiceVolume();
     relayRequest('/relay');
     setInterval(renderHealth, 30000);
   </script>

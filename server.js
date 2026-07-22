@@ -27,6 +27,7 @@ let ringRequest = null;
 let relayRequest = null;
 let restartRequest = null;
 let speakerVolume = 75;
+let aiVoiceVolume = 75;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -126,6 +127,41 @@ function setPhoneRingVolume(level) {
   });
 }
 
+function setPhoneAiVoiceVolume(level) {
+  return new Promise((resolve, reject) => {
+    const remote = new WebSocket(RING_CONTROLLER_URL);
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { remote.close(); } catch {}
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error('Raspberry Pi AI volume controller did not respond')),
+      10000
+    );
+    remote.on('open', () => {
+      remote.send(JSON.stringify({ id: 'rpi_controller', message: `ai_volume:${level}` }));
+    });
+    remote.on('message', raw => {
+      let message;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.id !== 'rpi_status') return;
+      if (message.message === `ai_volume_ok:${level}`) finish(null, { ok: true, level });
+      else if (message.message === `ai_volume_error:${level}`) {
+        finish(new Error(`Raspberry Pi could not set AI voice volume to ${level}%`));
+      }
+    });
+    remote.on('error', error => finish(error));
+    remote.on('close', () => {
+      if (!settled) finish(new Error('Raspberry Pi AI volume controller disconnected'));
+    });
+  });
+}
+
 app.post('/ring/volume', async (req, res) => {
   const level = Number(req.body?.level);
   if (!Number.isInteger(level) || level < 0 || level > 100) {
@@ -156,6 +192,25 @@ app.post('/speaker/volume', async (req, res) => {
     const result = await setPhoneRingVolume(level);
     speakerVolume = result.level;
     broadcast({ type: 'speaker_volume', level: speakerVolume });
+    return res.json(result);
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/ai/volume', (req, res) => {
+  res.json({ ok: true, level: aiVoiceVolume });
+});
+
+app.post('/ai/volume', async (req, res) => {
+  const level = Number(req.body?.level);
+  if (!Number.isInteger(level) || level < 0 || level > 100) {
+    return res.status(400).json({ ok: false, error: 'Volume must be an integer from 0 to 100' });
+  }
+  try {
+    const result = await setPhoneAiVoiceVolume(level);
+    aiVoiceVolume = result.level;
+    broadcast({ type: 'ai_voice_volume', level: aiVoiceVolume });
     return res.json(result);
   } catch (error) {
     return res.status(503).json({ ok: false, error: error.message });
@@ -397,6 +452,7 @@ wss.on('connection', (ws, req) => {
     sendJson(ws, currentScenarioState);
   }
   sendJson(ws, { type: 'speaker_volume', level: speakerVolume });
+  sendJson(ws, { type: 'ai_voice_volume', level: aiVoiceVolume });
 
   ws.on('message', raw => {
     let msg;
