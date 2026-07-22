@@ -839,19 +839,25 @@
       updateMeter('user', 0);
     }
 
-    async function start() {
+    function requestAudioResume() {
+      if (!audioContext || audioContext.state !== 'suspended') return;
+      audioContext.resume()
+        .then(flushPendingAudio)
+        .catch(() => {});
+    }
+
+    function start() {
       autoListen = true;
       if (!audioContext || audioContext.state === 'closed') {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioContext.state === 'suspended') {
-        try { await audioContext.resume(); } catch {}
+        audioContext.addEventListener('statechange', flushPendingAudio);
       }
 
       if (!channels.assistant.gain) createChannelAudioGraph('assistant');
       if (!channels.user.gain) createChannelAudioGraph('user');
 
       connectListener({ enableAudio: true });
+      requestAudioResume();
       flushPendingAudio();
     }
 
@@ -874,9 +880,10 @@
       connectListener({ enableAudio: false });
     }
 
-    async function unlockAutoAudio() {
+    function unlockAutoAudio() {
       if (!autoListen) return;
-      await start();
+      start();
+      requestAudioResume();
       if (audioContext?.state === 'running') {
         document.removeEventListener('pointerdown', unlockAutoAudio);
         document.removeEventListener('touchstart', unlockAutoAudio);
@@ -917,7 +924,11 @@
     setInterval(renderHealth, 30000);
     document.addEventListener('pointerdown', unlockAutoAudio);
     document.addEventListener('touchstart', unlockAutoAudio, { passive: true });
-    start().catch(error => setStatus(`Audio start failed: ${error.message}`));
+    try {
+      start();
+    } catch (error) {
+      setStatus(`Audio start failed: ${error.message}`);
+    }
   </script>
 </body>
 </html>
