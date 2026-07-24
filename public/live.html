@@ -135,6 +135,47 @@
       color: #eee;
       font-size: 14px;
     }
+    .toggle-control {
+      display: flex;
+      grid-template-columns: none;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      width: 100%;
+      color: #ddd;
+      font-size: 14px;
+    }
+    .toggle-control input {
+      appearance: none;
+      width: 48px;
+      height: 26px;
+      flex: 0 0 auto;
+      margin: 0;
+      border: 1px solid #666;
+      border-radius: 999px;
+      background: #292929;
+      cursor: pointer;
+      transition: background 150ms ease, border-color 150ms ease;
+    }
+    .toggle-control input::after {
+      content: "";
+      display: block;
+      width: 20px;
+      height: 20px;
+      margin: 2px;
+      border-radius: 50%;
+      background: #ccc;
+      transition: transform 150ms ease, background 150ms ease;
+    }
+    .toggle-control input:checked {
+      border-color: #22c55e;
+      background: #166534;
+    }
+    .toggle-control input:checked::after {
+      background: #fff;
+      transform: translateX(22px);
+    }
     .secret-hotspot {
       position: fixed;
       z-index: 20;
@@ -254,6 +295,13 @@
       </div>
 
       <div class="row">
+        <label class="toggle-control">
+          <span>Return to default scenario after disconnect</span>
+          <input id="returnToDefaultToggle" type="checkbox" checked>
+        </label>
+      </div>
+
+      <div class="row">
         <label>
           Default scenario
           <select id="defaultScenarioSelect">
@@ -292,6 +340,7 @@
     const aiVoiceVolumeValue = document.getElementById('aiVoiceVolumeValue');
     const defaultScenarioSelect = document.getElementById('defaultScenarioSelect');
     const currentScenarioSelect = document.getElementById('currentScenarioSelect');
+    const returnToDefaultToggle = document.getElementById('returnToDefaultToggle');
     const secretHotspot = document.getElementById('secretHotspot');
     const secretPanel = document.getElementById('secretPanel');
     const secretCloseBtn = document.getElementById('secretCloseBtn');
@@ -668,6 +717,9 @@
       }
       if (Number.isInteger(state.defaultIndex)) defaultScenarioSelect.value = String(state.defaultIndex);
       if (Number.isInteger(state.currentIndex)) currentScenarioSelect.value = String(state.currentIndex);
+      if (typeof state.returnToDefaultEnabled === 'boolean') {
+        returnToDefaultToggle.checked = state.returnToDefaultEnabled;
+      }
     }
 
     function sendListenerMessage(message) {
@@ -685,6 +737,12 @@
       const index = Number(select.value);
       setStatus(`Changing ${mode} scenario...`);
       sendListenerMessage({ type: 'scenario_control', mode, index });
+    }
+
+    function changeReturnToDefault() {
+      const enabled = returnToDefaultToggle.checked;
+      setStatus(enabled ? 'Enabling return to default...' : 'Blocking return to default...');
+      sendListenerMessage({ type: 'scenario_return_control', enabled });
     }
 
     function runHealthTestNow() {
@@ -742,6 +800,12 @@
 
       if (msg.type === 'scenario_control_result') {
         setStatus(msg.message || (msg.ok ? 'Scenario updated' : 'Scenario change failed'));
+        if (!msg.ok && lastScenarioState) applyScenarioState(lastScenarioState);
+        return;
+      }
+
+      if (msg.type === 'scenario_return_control_result') {
+        setStatus(msg.message || (msg.ok ? 'Return setting updated' : 'Return setting failed'));
         if (!msg.ok && lastScenarioState) applyScenarioState(lastScenarioState);
         return;
       }
@@ -931,6 +995,7 @@
     restartBtn.addEventListener('click', restartPhoneServer);
     defaultScenarioSelect.addEventListener('change', () => changeRemoteScenario('default', defaultScenarioSelect));
     currentScenarioSelect.addEventListener('change', () => changeRemoteScenario('current', currentScenarioSelect));
+    returnToDefaultToggle.addEventListener('change', changeReturnToDefault);
     secretHotspot.addEventListener('click', () => setSecretPanel(true));
     secretCloseBtn.addEventListener('click', () => setSecretPanel(false));
     document.addEventListener('keydown', event => {

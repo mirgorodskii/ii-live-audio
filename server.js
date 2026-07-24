@@ -407,6 +407,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'scenario_return_control_result') {
+        broadcast(msg);
+        return;
+      }
+
       if (msg.type === 'health') {
         const event = {
           type: 'health',
@@ -510,6 +515,28 @@ wss.on('connection', (ws, req) => {
       sendJson(source, { type: 'health_control' });
       return;
     }
+
+    if (msg.type === 'scenario_return_control') {
+      if (typeof msg.enabled !== 'boolean') {
+        sendJson(ws, {
+          type: 'scenario_return_control_result',
+          ok: false,
+          message: 'Invalid return-to-default setting'
+        });
+        return;
+      }
+      if (!source || source.readyState !== 1) {
+        sendJson(ws, {
+          type: 'scenario_return_control_result',
+          ok: false,
+          message: 'Phone is not connected'
+        });
+        return;
+      }
+      sendJson(source, { type: 'scenario_return_control', enabled: msg.enabled });
+      return;
+    }
+
     if (msg.type !== 'scenario_control') return;
 
     const index = Number(msg.index);
