@@ -412,6 +412,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'physical_scenario_buttons_control_result') {
+        broadcast(msg);
+        return;
+      }
+
       if (msg.type === 'health') {
         const event = {
           type: 'health',
@@ -534,6 +539,30 @@ wss.on('connection', (ws, req) => {
         return;
       }
       sendJson(source, { type: 'scenario_return_control', enabled: msg.enabled });
+      return;
+    }
+
+    if (msg.type === 'physical_scenario_buttons_control') {
+      if (typeof msg.enabled !== 'boolean') {
+        sendJson(ws, {
+          type: 'physical_scenario_buttons_control_result',
+          ok: false,
+          message: 'Invalid physical-button setting'
+        });
+        return;
+      }
+      if (!source || source.readyState !== 1) {
+        sendJson(ws, {
+          type: 'physical_scenario_buttons_control_result',
+          ok: false,
+          message: 'Phone is not connected'
+        });
+        return;
+      }
+      sendJson(source, {
+        type: 'physical_scenario_buttons_control',
+        enabled: msg.enabled
+      });
       return;
     }
 

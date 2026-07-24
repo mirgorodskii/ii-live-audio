@@ -302,6 +302,13 @@
       </div>
 
       <div class="row">
+        <label class="toggle-control">
+          <span>Allow physical scenario buttons</span>
+          <input id="physicalScenarioButtonsToggle" type="checkbox" checked>
+        </label>
+      </div>
+
+      <div class="row">
         <label>
           Default scenario
           <select id="defaultScenarioSelect">
@@ -341,6 +348,7 @@
     const defaultScenarioSelect = document.getElementById('defaultScenarioSelect');
     const currentScenarioSelect = document.getElementById('currentScenarioSelect');
     const returnToDefaultToggle = document.getElementById('returnToDefaultToggle');
+    const physicalScenarioButtonsToggle = document.getElementById('physicalScenarioButtonsToggle');
     const secretHotspot = document.getElementById('secretHotspot');
     const secretPanel = document.getElementById('secretPanel');
     const secretCloseBtn = document.getElementById('secretCloseBtn');
@@ -720,6 +728,9 @@
       if (typeof state.returnToDefaultEnabled === 'boolean') {
         returnToDefaultToggle.checked = state.returnToDefaultEnabled;
       }
+      if (typeof state.physicalScenarioButtonsEnabled === 'boolean') {
+        physicalScenarioButtonsToggle.checked = state.physicalScenarioButtonsEnabled;
+      }
     }
 
     function sendListenerMessage(message) {
@@ -743,6 +754,12 @@
       const enabled = returnToDefaultToggle.checked;
       setStatus(enabled ? 'Enabling return to default...' : 'Blocking return to default...');
       sendListenerMessage({ type: 'scenario_return_control', enabled });
+    }
+
+    function changePhysicalScenarioButtons() {
+      const enabled = physicalScenarioButtonsToggle.checked;
+      setStatus(enabled ? 'Enabling physical scenario buttons...' : 'Blocking physical scenario buttons...');
+      sendListenerMessage({ type: 'physical_scenario_buttons_control', enabled });
     }
 
     function runHealthTestNow() {
@@ -806,6 +823,12 @@
 
       if (msg.type === 'scenario_return_control_result') {
         setStatus(msg.message || (msg.ok ? 'Return setting updated' : 'Return setting failed'));
+        if (!msg.ok && lastScenarioState) applyScenarioState(lastScenarioState);
+        return;
+      }
+
+      if (msg.type === 'physical_scenario_buttons_control_result') {
+        setStatus(msg.message || (msg.ok ? 'Physical button setting updated' : 'Physical button setting failed'));
         if (!msg.ok && lastScenarioState) applyScenarioState(lastScenarioState);
         return;
       }
@@ -996,6 +1019,7 @@
     defaultScenarioSelect.addEventListener('change', () => changeRemoteScenario('default', defaultScenarioSelect));
     currentScenarioSelect.addEventListener('change', () => changeRemoteScenario('current', currentScenarioSelect));
     returnToDefaultToggle.addEventListener('change', changeReturnToDefault);
+    physicalScenarioButtonsToggle.addEventListener('change', changePhysicalScenarioButtons);
     secretHotspot.addEventListener('click', () => setSecretPanel(true));
     secretCloseBtn.addEventListener('click', () => setSecretPanel(false));
     document.addEventListener('keydown', event => {
