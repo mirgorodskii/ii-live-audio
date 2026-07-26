@@ -18,10 +18,26 @@
       padding: 24px;
     }
     main {
-      width: min(720px, 100%);
+      width: min(980px, 100%);
       display: grid;
       gap: 18px;
     }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid #333;
+      padding-bottom: 8px;
+    }
+    .tab-button {
+      border-color: transparent;
+      color: #999;
+    }
+    .tab-button.active {
+      border-color: #777;
+      color: #fff;
+      background: #222;
+    }
+    [hidden] { display: none !important; }
     .panel {
       border: 1px solid #333;
       background: #1c1c1c;
@@ -227,8 +243,126 @@
     }
     .audio-channel h3 { margin: 0; font-size: 16px; }
     .audio-channel input[type="range"] { width: 100%; }
+    .logs-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .logs-toolbar h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .logs-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+      gap: 14px;
+      min-height: 480px;
+    }
+    .log-list {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      max-height: 65vh;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .log-list-empty {
+      color: #888;
+      font-size: 14px;
+      padding: 14px 4px;
+    }
+    .log-list button {
+      width: 100%;
+      display: grid;
+      gap: 5px;
+      padding: 12px;
+      text-align: left;
+      font-weight: 500;
+      border-color: #3a3a3a;
+      background: #181818;
+    }
+    .log-list button.active {
+      border-color: #aaa;
+      background: #292929;
+    }
+    .log-title {
+      color: #eee;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .log-meta {
+      color: #999;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .log-reader {
+      min-width: 0;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #171717;
+      padding: 16px;
+      overflow: auto;
+    }
+    .log-reader-empty {
+      color: #888;
+      font-size: 14px;
+    }
+    .log-reader-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #333;
+    }
+    .log-reader-header h3 {
+      margin: 0 0 5px;
+      font-size: 18px;
+    }
+    .log-download {
+      display: inline-block;
+      flex: 0 0 auto;
+      border: 1px solid #777;
+      border-radius: 6px;
+      padding: 9px 12px;
+      color: #eee;
+      font-size: 13px;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    .transcript {
+      display: grid;
+      gap: 14px;
+      padding-top: 16px;
+    }
+    .transcript-message {
+      display: grid;
+      gap: 5px;
+    }
+    .transcript-role {
+      color: #8f8f8f;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .transcript-message.assistant .transcript-role { color: #7dd3fc; }
+    .transcript-message.user .transcript-role { color: #fbbf24; }
+    .transcript-text {
+      margin: 0;
+      color: #eee;
+      font-size: 14px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     @media (max-width: 620px) {
       .audio-settings { grid-template-columns: 1fr; }
+      body { align-items: flex-start; padding: 14px; }
+      .logs-layout { grid-template-columns: 1fr; min-height: 0; }
+      .log-list { max-height: 280px; }
+      .log-reader { min-height: 360px; }
     }
   </style>
 </head>
@@ -265,7 +399,12 @@
   </aside>
 
   <main>
-    <section class="panel">
+    <nav class="tabs" aria-label="Listener sections">
+      <button id="controlsTabBtn" class="tab-button active" type="button">Controls</button>
+      <button id="logsTabBtn" class="tab-button" type="button">Session Logs</button>
+    </nav>
+
+    <section id="controlsTab" class="panel">
       <div class="row">
         <button id="startBtn">Start</button>
         <button id="healthOnlyBtn">View Health Status Only</button>
@@ -332,6 +471,24 @@
       </div>
     </section>
 
+    <section id="logsTab" class="panel" hidden>
+      <div class="logs-toolbar">
+        <div>
+          <h2>Session Logs</h2>
+          <div id="logsStatus" class="status">Open this tab to load saved sessions.</div>
+        </div>
+        <button id="refreshLogsBtn" type="button">Refresh</button>
+      </div>
+      <div class="logs-layout">
+        <div id="sessionLogList" class="log-list">
+          <div class="log-list-empty">No saved sessions loaded.</div>
+        </div>
+        <article id="sessionLogReader" class="log-reader">
+          <div class="log-reader-empty">Select a session to read its transcript.</div>
+        </article>
+      </div>
+    </section>
+
   </main>
 
   <script>
@@ -364,6 +521,14 @@
     const warningBox = document.getElementById('warningBox');
     const warningText = document.getElementById('warningText');
     const healthStatus = document.getElementById('healthStatus');
+    const controlsTabBtn = document.getElementById('controlsTabBtn');
+    const logsTabBtn = document.getElementById('logsTabBtn');
+    const controlsTab = document.getElementById('controlsTab');
+    const logsTab = document.getElementById('logsTab');
+    const logsStatus = document.getElementById('logsStatus');
+    const refreshLogsBtn = document.getElementById('refreshLogsBtn');
+    const sessionLogList = document.getElementById('sessionLogList');
+    const sessionLogReader = document.getElementById('sessionLogReader');
 
     let ws = null;
     let audioContext = null;
@@ -377,6 +542,7 @@
     let ringVolumeTimer = null;
     let aiVoiceVolumeTimer = null;
     let lastScenarioState = null;
+    let selectedSessionLogId = null;
     const pendingListenerMessages = [];
     const HEALTH_STALE_AFTER_MS = 40 * 60 * 1000;
     const MAX_PLAYBACK_BACKLOG_SECONDS = 2;
@@ -459,6 +625,152 @@
       if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
       const hours = Math.floor(minutes / 60);
       return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    }
+
+    function formatDuration(seconds) {
+      const value = Math.max(0, Number(seconds) || 0);
+      const minutes = Math.floor(value / 60);
+      const remainder = Math.round(value % 60);
+      return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+    }
+
+    function setActiveTab(name) {
+      const showingLogs = name === 'logs';
+      controlsTab.hidden = showingLogs;
+      logsTab.hidden = !showingLogs;
+      controlsTabBtn.classList.toggle('active', !showingLogs);
+      logsTabBtn.classList.toggle('active', showingLogs);
+      if (showingLogs) loadSessionLogs();
+    }
+
+    function clearElement(element) {
+      while (element.firstChild) element.removeChild(element.firstChild);
+    }
+
+    function appendTextElement(parent, tagName, className, text) {
+      const element = document.createElement(tagName);
+      element.className = className;
+      element.textContent = text;
+      parent.appendChild(element);
+      return element;
+    }
+
+    async function loadSessionLogs() {
+      refreshLogsBtn.disabled = true;
+      logsStatus.textContent = 'Loading saved sessions...';
+      try {
+        const response = await fetch('/api/session-logs', { cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        renderSessionLogList(result.logs || []);
+        logsStatus.textContent = `${result.logs?.length || 0} saved session${result.logs?.length === 1 ? '' : 's'}`;
+      } catch (error) {
+        logsStatus.textContent = `Could not load logs: ${error.message}`;
+      } finally {
+        refreshLogsBtn.disabled = false;
+      }
+    }
+
+    function renderSessionLogList(logs) {
+      clearElement(sessionLogList);
+      if (!logs.length) {
+        appendTextElement(
+          sessionLogList,
+          'div',
+          'log-list-empty',
+          'No session logs yet. New calls will appear here after disconnect.'
+        );
+        return;
+      }
+
+      for (const log of logs) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.classList.toggle('active', log.id === selectedSessionLogId);
+        const scenario = log.scenario || {};
+        appendTextElement(
+          button,
+          'span',
+          'log-title',
+          `${scenario.number ? `${scenario.number}. ` : ''}${scenario.name || 'Unknown scenario'}`
+        );
+        appendTextElement(
+          button,
+          'span',
+          'log-meta',
+          `${formatDateTime(log.startedAt)}\n${log.messageCount || 0} messages · ${formatDuration(log.durationSeconds)}`
+        );
+        button.addEventListener('click', () => loadSessionLog(log.id, button));
+        sessionLogList.appendChild(button);
+      }
+    }
+
+    async function loadSessionLog(id, button) {
+      selectedSessionLogId = id;
+      sessionLogList.querySelectorAll('button').forEach(item => {
+        item.classList.toggle('active', item === button);
+      });
+      clearElement(sessionLogReader);
+      appendTextElement(sessionLogReader, 'div', 'log-reader-empty', 'Loading transcript...');
+      try {
+        const response = await fetch(`/api/session-logs/${encodeURIComponent(id)}`, {
+          cache: 'no-store'
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        renderSessionLog(result.session);
+      } catch (error) {
+        clearElement(sessionLogReader);
+        appendTextElement(
+          sessionLogReader,
+          'div',
+          'log-reader-empty',
+          `Could not load transcript: ${error.message}`
+        );
+      }
+    }
+
+    function renderSessionLog(session) {
+      clearElement(sessionLogReader);
+      const header = document.createElement('header');
+      header.className = 'log-reader-header';
+      const heading = document.createElement('div');
+      const scenario = session.scenario || {};
+      appendTextElement(
+        heading,
+        'h3',
+        '',
+        `${scenario.number ? `${scenario.number}. ` : ''}${scenario.name || 'Unknown scenario'}`
+      );
+      appendTextElement(
+        heading,
+        'div',
+        'log-meta',
+        `${formatDateTime(session.startedAt)} · ${session.messageCount || session.messages?.length || 0} messages · ${formatDuration(session.durationSeconds)}`
+      );
+      header.appendChild(heading);
+      const download = document.createElement('a');
+      download.className = 'log-download';
+      download.href = `/api/session-logs/${encodeURIComponent(session.id)}/download`;
+      download.textContent = 'Download';
+      header.appendChild(download);
+      sessionLogReader.appendChild(header);
+
+      const transcript = document.createElement('div');
+      transcript.className = 'transcript';
+      for (const message of session.messages || []) {
+        const wrapper = document.createElement('section');
+        wrapper.className = `transcript-message ${message.role || ''}`;
+        appendTextElement(
+          wrapper,
+          'div',
+          'transcript-role',
+          `${message.role || 'unknown'}${message.timestamp ? ` · ${message.timestamp}` : ''}`
+        );
+        appendTextElement(wrapper, 'p', 'transcript-text', message.text || '');
+        transcript.appendChild(wrapper);
+      }
+      sessionLogReader.appendChild(transcript);
     }
 
     function renderHealth() {
@@ -874,6 +1186,11 @@
         return;
       }
 
+      if (msg.type === 'session_log_available') {
+        if (!logsTab.hidden) loadSessionLogs();
+        return;
+      }
+
       if (msg.type === 'audio') {
         playPcm16(msg.channel, msg.audio, msg.sampleRate);
       }
@@ -1011,6 +1328,9 @@
     }
 
     startBtn.addEventListener('click', start);
+    controlsTabBtn.addEventListener('click', () => setActiveTab('controls'));
+    logsTabBtn.addEventListener('click', () => setActiveTab('logs'));
+    refreshLogsBtn.addEventListener('click', loadSessionLogs);
     healthOnlyBtn.addEventListener('click', checkHealthOnly);
     runHealthTestBtn.addEventListener('click', runHealthTestNow);
     ringBtn.addEventListener('click', ringUsbSpeaker);

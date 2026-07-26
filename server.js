@@ -1,12 +1,18 @@
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const { WebSocket, WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const SOURCE_TOKEN = process.env.SOURCE_TOKEN || '';
 const RING_CONTROLLER_URL = process.env.RING_CONTROLLER_URL ||
   'wss://ii-websocket-server-a9b7d506f512.herokuapp.com';
+const SESSION_LOG_DIR = process.env.SESSION_LOG_DIR ||
+  (process.env.RAILWAY_VOLUME_MOUNT_PATH
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'session-logs')
+    : path.join(__dirname, 'data', 'session-logs'));
 
 const app = express();
 const server = http.createServer(app);
@@ -34,6 +40,166 @@ let recentAssistantAudio = [];
 const ASSISTANT_REPLAY_WINDOW_MS = 20000;
 
 app.use(express.json());
+
+fs.mkdirSync(SESSION_LOG_DIR, { recursive: true });
+
+function safeLogId(value) {
+  const id = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9._-]{1,120}$/.test(id) ? id : randomUUID();
+}
+
+function safeIsoDate(value, fallback) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+}
+
+function normalizeSessionLog(raw) {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Session log is missing');
+  }
+
+  const endedAt = safeIsoDate(raw.endedAt, new Date().toISOString());
+  const startedAt = safeIsoDate(raw.startedAt, endedAt);
+  const scenario = raw.scenario && typeof raw.scenario === 'object'
+    ? {
+        index: Number.isInteger(raw.scenario.index) ? raw.scenario.index : null,
+        number: Number.isInteger(raw.scenario.number) ? raw.scenario.number : null,
+        name: String(raw.scenario.name || 'Unknown scenario').slice(0, 200),
+        voice: String(raw.scenario.voice || '').slice(0, 100)
+      }
+    : { index: null, number: null, name: 'Unknown scenario', voice: '' };
+
+  let totalTextLength = 0;
+  const messages = (Array.isArray(raw.messages) ? raw.messages : [])
+    .slice(0, 1000)
+    .map(message => {
+      const text = String(message?.text || '').slice(0, 50000);
+      totalTextLength += text.length;
+      return {
+        role: ['user', 'assistant', 'system'].includes(message?.role)
+          ? message.role
+          : 'unknown',
+        text,
+        timestamp: String(message?.timestamp || '').slice(0, 100),
+        at: message?.at ? safeIsoDate(message.at, null) : null
+      };
+    });
+
+  if (!messages.length) throw new Error('Session log contains no messages');
+  if (totalTextLength > 2_000_000) throw new Error('Session log is too large');
+
+  return {
+    id: safeLogId(raw.id),
+    startedAt,
+    endedAt,
+    disconnectReason: String(raw.disconnectReason || 'disconnect').slice(0, 100),
+    scenario,
+    messages,
+    messageCount: messages.length,
+    durationSeconds: Math.max(
+      0,
+      Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000)
+    ),
+    savedAt: new Date().toISOString()
+  };
+}
+
+function sessionLogPath(id) {
+  return path.join(SESSION_LOG_DIR, `${safeLogId(id)}.json`);
+}
+
+function saveSessionLog(raw) {
+  const session = normalizeSessionLog(raw);
+  const target = sessionLogPath(session.id);
+  const temporary = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(session, null, 2), 'utf8');
+  fs.renameSync(temporary, target);
+  return session;
+}
+
+function readSessionLog(id) {
+  if (!/^[A-Za-z0-9._-]{1,120}$/.test(id || '')) return null;
+  const filename = sessionLogPath(id);
+  if (!fs.existsSync(filename)) return null;
+  return JSON.parse(fs.readFileSync(filename, 'utf8'));
+}
+
+function sessionLogSummary(session) {
+  return {
+    id: session.id,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    scenario: session.scenario,
+    messageCount: session.messageCount ?? session.messages?.length ?? 0,
+    durationSeconds: session.durationSeconds ?? 0
+  };
+}
+
+function listSessionLogs() {
+  return fs.readdirSync(SESSION_LOG_DIR)
+    .filter(filename => filename.endsWith('.json'))
+    .map(filename => {
+      try {
+        return sessionLogSummary(
+          JSON.parse(fs.readFileSync(path.join(SESSION_LOG_DIR, filename), 'utf8'))
+        );
+      } catch (error) {
+        console.warn(`Could not read session log ${filename}:`, error.message);
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.endedAt).getTime() - new Date(a.endedAt).getTime());
+}
+
+app.get('/api/session-logs', (req, res) => {
+  try {
+    res.json({ ok: true, logs: listSessionLogs() });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/session-logs/:id', (req, res) => {
+  try {
+    const session = readSessionLog(req.params.id);
+    if (!session) return res.status(404).json({ ok: false, error: 'Session log not found' });
+    return res.json({ ok: true, session });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/session-logs/:id/download', (req, res) => {
+  try {
+    const session = readSessionLog(req.params.id);
+    if (!session) return res.status(404).send('Session log not found');
+    const scenario = session.scenario || {};
+    const lines = [
+      '═══ THE PHONE - SESSION LOG ═══',
+      `Started: ${new Date(session.startedAt).toLocaleString()}`,
+      `Ended: ${new Date(session.endedAt).toLocaleString()}`,
+      `Scenario: ${scenario.number || ''}. ${scenario.name || 'Unknown'}`.replace(': .', ':'),
+      `Voice: ${scenario.voice || 'unknown'}`,
+      `Messages: ${session.messages.length}`,
+      ''
+    ];
+    for (const message of session.messages) {
+      lines.push(`[${message.timestamp || ''}] ${String(message.role).toUpperCase()}:`);
+      lines.push(message.text, '');
+    }
+    lines.push(`═══ Duration: ${session.durationSeconds || 0}s ═══`);
+    const name = String(scenario.name || 'session').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="the_phone_${scenario.number || 'x'}_${name}_${session.id}.txt"`
+    );
+    return res.type('text/plain').send(lines.join('\n'));
+  } catch (error) {
+    return res.status(500).send(error.message);
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (req, res) => {
@@ -444,6 +610,30 @@ wss.on('connection', (ws, req) => {
         currentHandsetState = event;
         if (!event.lifted) recentAssistantAudio = [];
         broadcast(event);
+        return;
+      }
+
+      if (msg.type === 'session_log') {
+        try {
+          const session = saveSessionLog(msg.session);
+          sendJson(ws, {
+            type: 'session_log_saved',
+            ok: true,
+            id: session.id,
+            messageCount: session.messageCount
+          });
+          broadcast({
+            type: 'session_log_available',
+            session: sessionLogSummary(session)
+          });
+        } catch (error) {
+          sendJson(ws, {
+            type: 'session_log_saved',
+            ok: false,
+            id: msg.session?.id || null,
+            error: error.message
+          });
+        }
         return;
       }
 
